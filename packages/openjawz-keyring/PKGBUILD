@@ -1,0 +1,24 @@
+# Maintainer: OpenJAWZ maintainers <https://github.com/HaseebKhalid1507/OpenJAWZ/issues>
+#
+# The trust root. Public material only: keys/openjawz.gpg (export), keys/openjawz-trusted, keys/openjawz-revoked.
+# `boot` pins this package by sha256 and installs it with pacman -U before the repo line goes live.
+# CI/dev: OPENJAWZ_KEYS=/dir/with/{openjawz.gpg,openjawz-trusted,openjawz-revoked} makepkg -f  (a throwaway key)
+
+pkgname=openjawz-keyring
+pkgver=20260905
+pkgrel=1
+pkgdesc='OpenJAWZ package signing keys'
+arch=('any')
+url='https://github.com/HaseebKhalid1507/OpenJAWZ'
+license=('MIT')
+install=openjawz-keyring.install
+source=()
+sha256sums=()
+
+package() {
+  local keys="${OPENJAWZ_KEYS:-$startdir/keys}"
+  [[ -s "$keys/openjawz.gpg" ]] || { echo "no keys in $keys (see packages/README.md)" >&2; return 1; }
+  install -Dm644 "$keys/openjawz.gpg"      "$pkgdir/usr/share/pacman/keyrings/openjawz.gpg"
+  install -Dm644 "$keys/openjawz-trusted"  "$pkgdir/usr/share/pacman/keyrings/openjawz-trusted"
+  install -Dm644 "$keys/openjawz-revoked"  "$pkgdir/usr/share/pacman/keyrings/openjawz-revoked"
+}

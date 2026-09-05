@@ -1,0 +1,6 @@
+post_install() {
+  usr/bin/pacman-key --populate openjawz
+}
+post_upgrade() {
+  usr/bin/pacman-key --populate openjawz
+}

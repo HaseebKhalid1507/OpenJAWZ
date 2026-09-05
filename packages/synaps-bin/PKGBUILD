@@ -1,0 +1,42 @@
+# Maintainer: OpenJAWZ maintainers <https://github.com/HaseebKhalid1507/OpenJAWZ/issues>
+#
+# Pinned to the Synaps prerelease that carries daemon mode. Attached rc form (vercmp-safe).
+# Dev override:  SYNAPS_TARBALL=/path/synaps-<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf
+#   (the tarball must sit next to a SHA256SUMS file, or set SYNAPS_SHA256=<hex>)
+
+pkgname=synaps-bin
+pkgver=0.9.1rc1
+pkgrel=1
+pkgdesc='Synaps agent runtime — daemon + thin client (prebuilt)'
+arch=('x86_64')                         # aarch64 stanza is v0.2 (deck)
+url='https://github.com/HaseebKhalid1507/SynapsCLI'
+license=('MIT')
+provides=("synaps=$pkgver")
+conflicts=('synaps')
+options=('!strip')
+_tag="v$pkgver"
+_asset="synaps-$_tag-x86_64-unknown-linux-gnu.tar.gz"
+
+if [[ -n ${SYNAPS_TARBALL:-} ]]; then
+  source=("$_asset::file://$SYNAPS_TARBALL")
+  if [[ -n ${SYNAPS_SHA256:-} ]]; then sha256sums=("$SYNAPS_SHA256")
+  else sha256sums=("$(grep -F "$(basename "$SYNAPS_TARBALL")" "$(dirname "$SYNAPS_TARBALL")/SHA256SUMS" | awk '{print $1}')"); fi
+else
+  source=("$_asset::$url/releases/download/$_tag/$_asset")
+  # from the release's SHA256SUMS, verified by hand; bump with the tag
+  sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+fi
+# aarch64 (v0.2):
+# source_aarch64=("synaps-$_tag-aarch64-unknown-linux-gnu.tar.gz::$url/releases/download/$_tag/synaps-$_tag-aarch64-unknown-linux-gnu.tar.gz")
+# sha256sums_aarch64=('…')
+
+package() {
+  local bin
+  bin="$(find "$srcdir" -type f -name synaps -perm -u+x | head -1)"
+  [[ -n "$bin" ]] || { echo "no synaps binary in $_asset" >&2; return 1; }
+  install -Dm755 "$bin" "$pkgdir/usr/bin/synaps"
+  local lic
+  lic="$(find "$srcdir" -maxdepth 3 -type f -iname 'LICENSE*' | head -1)"
+  [[ -n "$lic" ]] && install -Dm644 "$lic" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  return 0
+}

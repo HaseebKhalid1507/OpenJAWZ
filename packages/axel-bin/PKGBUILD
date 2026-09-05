@@ -1,0 +1,39 @@
+# Maintainer: OpenJAWZ maintainers <https://github.com/HaseebKhalid1507/OpenJAWZ/issues>
+#
+# axel — the memory engine (the brain). Written against the release layout we need:
+#   axel-v<ver>-x86_64-unknown-linux-gnu.tar.gz + SHA256SUMS on the GitHub release.
+# Until that release exists this is an optdepends of openjawz-meta and `openjawz doctor` reports the brain absent.
+# Dev override:  AXEL_TARBALL=/path/axel-v<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf  (SHA256SUMS beside it, or AXEL_SHA256=)
+
+pkgname=axel-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='axel — persistent agent memory with provenance (prebuilt)'
+arch=('x86_64')
+url='https://github.com/HaseebKhalid1507/axel'
+license=('MIT')
+provides=("axel=$pkgver")
+conflicts=('axel')
+options=('!strip')
+_tag="v$pkgver"
+_asset="axel-$_tag-x86_64-unknown-linux-gnu.tar.gz"
+
+if [[ -n ${AXEL_TARBALL:-} ]]; then
+  source=("$_asset::file://$AXEL_TARBALL")
+  if [[ -n ${AXEL_SHA256:-} ]]; then sha256sums=("$AXEL_SHA256")
+  else sha256sums=("$(grep -F "$(basename "$AXEL_TARBALL")" "$(dirname "$AXEL_TARBALL")/SHA256SUMS" | awk '{print $1}')"); fi
+else
+  source=("$_asset::$url/releases/download/$_tag/$_asset")
+  sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+fi
+
+package() {
+  local bin
+  bin="$(find "$srcdir" -type f -name axel -perm -u+x | head -1)"
+  [[ -n "$bin" ]] || { echo "no axel binary in $_asset" >&2; return 1; }
+  install -Dm755 "$bin" "$pkgdir/usr/bin/axel"
+  local lic
+  lic="$(find "$srcdir" -maxdepth 3 -type f -iname 'LICENSE*' | head -1)"
+  [[ -n "$lic" ]] && install -Dm644 "$lic" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  return 0
+}

@@ -31,6 +31,8 @@ fi
 mapfile -t pkgs < <(pacman -Qq 2>/dev/null | grep -E '^openjawz-' || true)
 if [ "$all" = 1 ]; then while IFS= read -r p; do [ -n "$p" ] && pkgs+=("$p"); done < <(pacman -Qq 2>/dev/null | grep -E '^(synaps-bin|axel-bin)$' || true); fi
 if [ "${#pkgs[@]}" -gt 0 ]; then
+  # keep the runtime (and the brain engine) unless --all: they must not go as orphans of the meta package
+  [ "$all" = 1 ] || { for k in synaps-bin axel-bin; do pacman -Q "$k" >/dev/null 2>&1 && $sudo pacman -D -q --asexplicit "$k" >/dev/null 2>&1 || true; done; }
   oj::run $sudo pacman -Rns ${OPENJAWZ_YES:+--noconfirm} "${pkgs[@]}"
 else
   oj::log info "no openjawz packages installed"

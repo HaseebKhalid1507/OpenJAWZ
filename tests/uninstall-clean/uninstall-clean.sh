@@ -12,6 +12,9 @@ grep -q 'openjawz.conf' /etc/pacman.conf && bad "Include left in pacman.conf" ||
 [ -z "$(ls ~/.synaps-cli/plugins/ 2>/dev/null)" ] && ok "plugin symlinks gone" || bad "plugin symlinks left"
 [ -f ~/.config/axel/axel.r8 ] && ok "brain (~/.config/axel) kept" || bad "brain removed"
 [ -f ~/.local/share/openjawz/keep-me ] && ok "state kept with --keep-brain" || bad "state removed"
-openjawz uninstall --yes --purge >/dev/null 2>&1 || true
+# --purge --all leg: reinstall from the local repo, then remove everything
+sudo pacman -S --noconfirm openjawz-meta >/dev/null 2>&1 || bad "reinstall for the purge leg failed"
+openjawz uninstall --yes --purge --all >/dev/null 2>&1 || bad "uninstall --purge --all exited non-zero"
 [ ! -e ~/.local/share/openjawz ] && ok "--purge removed state" || bad "--purge left state"
+pacman -Q synaps-bin >/dev/null 2>&1 && bad "--all left synaps-bin" || ok "--all removed synaps-bin"
 echo "uninstall-clean: fail=$fail"; exit "$fail"

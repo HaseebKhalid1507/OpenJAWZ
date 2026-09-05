@@ -101,7 +101,7 @@ What `openjawz doctor` shows yellow on a fresh box, honestly:
 - **fs hook** — exits clean if none of `watch.list` exists yet (`~/Projects`, `~/Downloads`).
 - **repo unsigned** — always, in v0.1.0: local mode is the only mode. The public repo will be `SigLevel = Required`.
 
-Gauntlet: see `docs/gauntlet/summary.md` once a round has run.
+Gauntlet: round 1 ran and returned NO-SHIP; the fixes are on `main` and `docs/status.md` ("Gauntlet") summarises what changed. There is no `docs/gauntlet/` directory yet.
 
 ## License
 

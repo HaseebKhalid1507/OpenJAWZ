@@ -61,7 +61,20 @@ From the three handoffs and PLAN §9:
 - **C**: tools batch 2 (toolmake, tools-doc, maintain, backup, yt, web, tracker); the 12 lifted skills
   (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`; whiptail fallback for onboard.
 - Derivative-distro matrix entry (`ID_LIKE=arch` os-release override in the smoke).
-- Gauntlet rounds → `docs/gauntlet/summary.md`.
+- Gauntlet round 2 (round 1: see "Gauntlet" below) → `docs/gauntlet/summary.md` once committed.
+
+## Gauntlet
+
+Playbook: `crew/playbooks/gauntlet.md`. **Round 1 has run** (five adversaries — Stranger, Packager, Auditor,
+Architect, Reader — on the A+B+C merge). Verdict: **NO-SHIP**, findings split into three fix scopes
+(A: packaging/boot, B: daemon/hooks/ui, C: docs truth + brain + ops) and landed as `fix1/{a,b,c}`. The
+round files themselves are not in this tree; the fixes are the commits and this section is the summary.
+Scope C, this branch: README says local mode is the only install path; no `openjawz deck` verb is
+claimed; architecture/spectrum describe the shipped `Type=simple` daemon; memory gates are stated as
+bench-box-only; `brain scan` really scans (Python `sqlite3` REGEXP, fixture-DB test); `brain purge`;
+`umask 077` on brain backups; one axel spawn story; onboarding counted honestly; OP.md lists only verbs
+that exist; `openjawz shutdown` verifies before it writes. Round 2 has not run. `docs/gauntlet/` does
+not exist until a round's merged file is committed.
 
 ## Synaps PRs still needed (PLAN §7)
 

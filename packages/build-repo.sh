@@ -63,8 +63,17 @@ build() { # dir [--unsigned] env…
   echo "== $d"
   ( cd "$src/packages/$d" && env "$@" "${cmd[@]}" ) || { echo "!! $d failed" >&2; failed+=("$d"); return 1; }
 }
-# -e: the tag checkout is skipped when a local tree is supplied (prepare() copies it in)
-mk+=(-e); build openjawz OPENJAWZ_SRC="$src" || true; unset "mk[-1]"
+# the unconditional git source (A11) is satisfied offline: SRCDEST holds a bare mirror of the local tree
+# with tag v$ver at HEAD (or the working tree committed on the fly); prepare() then overlays the tree itself
+srcdest="$work/srcdest"; mkdir -p "$srcdest"
+if git -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
+  git clone -q --bare "$src" "$srcdest/openjawz"
+  git -C "$srcdest/openjawz" tag -f "v$ver" HEAD >/dev/null 2>&1 || true
+else
+  ( cd "$src" && git init -q . && git add -A && git -c user.name=oj -c user.email=oj@localhost commit -qm src && git tag "v$ver" ) >/dev/null 2>&1
+  git clone -q --bare "$src" "$srcdest/openjawz"
+fi
+mk+=(--holdver); build openjawz OPENJAWZ_SRC="$src" SRCDEST="$srcdest" || true; unset "mk[-1]"
 if [ -n "${SYNAPS_TARBALL:-}" ]; then cp -f "$SYNAPS_TARBALL" "$src/packages/synaps-bin/"; build synaps-bin SYNAPS_TARBALL="$SYNAPS_TARBALL" ${SYNAPS_SHA256:+SYNAPS_SHA256="$SYNAPS_SHA256"} || true
 else echo "-- synaps-bin: no SYNAPS_TARBALL, trying the release URL"; build synaps-bin A=1 || true; fi
 if [ -n "${AXEL_TARBALL:-}" ]; then cp -f "$AXEL_TARBALL" "$src/packages/axel-bin/"; build axel-bin AXEL_TARBALL="$AXEL_TARBALL" ${AXEL_SHA256:+AXEL_SHA256="$AXEL_SHA256"} || true

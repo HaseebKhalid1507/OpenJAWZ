@@ -83,7 +83,7 @@ the handoff and a journal entry, `shutdown` refuses and prints what is missing. 
 ```bash
 openjawz doctor                 # green / yellow / red table
 ```
-Yellow is fine on a first run: brain absent (no axel), no ambient session yet, `graphical-session.target` inactive on SSH.
+Yellow is fine on a first run: brain absent (no axel), no ambient session yet, `graphical-session.target` inactive when a display is present but the target hasn't started (over SSH the whole row is absent — `doctor` only checks it when `WAYLAND_DISPLAY`/`DISPLAY` is set).
 Red means stop and read the line.
 
 Next: [02-daily.md](02-daily.md).

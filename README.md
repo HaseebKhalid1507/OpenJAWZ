@@ -16,6 +16,18 @@ sha256sum -c boot.sha256 && sh boot
 
 Two files, one checksum, then run it. (A short domain will front this once it is live; the raw URL is the source of truth.)
 
+**Not live yet.** v0.1.0 has no published repo, no release keyring, and no signed packages: the keyring
+checksum in `boot` is a placeholder and the public path stops there on purpose. Today the only path that
+installs is **local mode** — build the repo yourself, then point `boot` at it:
+
+```sh
+packages/build-repo.sh --throwaway      # PKGBUILDs → build/repo (throwaway key; SYNAPS_TARBALL= for the runtime)
+sh boot --local build/repo              # unsigned, prints a red UNSIGNED LOCAL REPO banner
+```
+
+That is what `tests/install-smoke` runs in `archlinux:latest`. The public path turns on when the maintainer
+prerequisites in `docs/status.md` (P-R1 runtime tag, P-R2 axel tarball, P-R3 signing key) land.
+
 Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs packages, not a distro. Never touches your bootloader or display manager. `sudo` is called where needed; the script itself refuses to run as root.
 
 When it's done you have:
@@ -76,18 +88,18 @@ openjawz uninstall --purge      # also removes state and the brain (asks first; 
 
 ## Security
 
-Signed repo (`SigLevel = Required`), no secrets in this tree (`tests/grep-guard` enforces it on every push), scripts never run as root, the brain's secret-pattern refusal is documented in `brain/memory-policy.md`. The reviewer's table lives in `docs/security.md`.
+Signed repo (`SigLevel = Required` on the public path — not yet published; local mode is `Optional TrustAll` and says so), no secrets in this tree (`tests/grep-guard` enforces it on every push), scripts never run as root, the brain's secret-pattern refusal is documented in `brain/memory-policy.md`. The reviewer's table lives in `docs/security.md`.
 
 ## Status
 
-**v0.1.0 — passes install-smoke in `archlinux:latest`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). Full table, what is yellow, and what slipped: `docs/status.md`.
+**v0.1.0 — passes install-smoke in `archlinux:latest` via `boot --local`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). No public repo yet — see "The 10-minute promise". Full table, what is yellow, and what slipped: `docs/status.md`.
 
 What `openjawz doctor` shows yellow on a fresh box, honestly:
 
 - **brain absent** — until an `axel` release tarball exists, `axel-bin` cannot be built from a URL; the brain rows stay yellow and `openjawz brain init` skips.
 - **desktop / notify hooks** — condition-skipped until a Wayland session exports `WAYLAND_DISPLAY` to systemd (`doctor` prints the exec-once line).
 - **fs hook** — exits clean if none of `watch.list` exists yet (`~/Projects`, `~/Downloads`).
-- **repo unsigned** — only in `--local` test mode; the public repo is `SigLevel = Required`.
+- **repo unsigned** — always, in v0.1.0: local mode is the only mode. The public repo will be `SigLevel = Required`.
 
 Gauntlet: see `docs/gauntlet/summary.md` once a round has run.
 

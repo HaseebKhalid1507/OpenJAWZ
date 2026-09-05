@@ -7,6 +7,9 @@ Wants=synaps-daemon.service
 # daemon's Upholds= starts it again → `ambient ensure` re-runs → the session is back.
 BindsTo=synaps-daemon.service
 PartOf=synaps-daemon.service
+# `ensure` calls the model (attach --create); if it keeps failing, Upholds= must not retry it forever
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=oneshot

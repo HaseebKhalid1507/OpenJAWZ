@@ -89,16 +89,19 @@ oj::run() {
   oj::log info "+ $*" >/dev/null 2>&1
   "$@"
 }
-# oj::lock NAME — one instance per user. The fd is inherited by children (bash has no close-on-exec), so:
+# oj::lock NAME — one instance of NAME per user. The fd is inherited by children (bash has no close-on-exec), so:
 #   * call it AFTER any `exec` re-exec of the script (script/sudo), never before — the child would block on itself;
-#   * idempotent within one process tree: a re-exec'd child that inherits OJ_LOCK_FD keeps the lock it already holds.
+#   * idempotent per NAME within one process tree: a re-exec of the same verb keeps the lock it holds; a child verb takes its own.
 oj::lock() {
-  local name="$1"
-  [ -n "${OJ_LOCK_FD:-}" ] && return 0
+  local name="$1" held="OJ_LOCK_HELD_${1//[^A-Za-z0-9_]/_}" fd
+  # per-NAME guard: a re-exec of the same verb (update under `script`) does not double-lock,
+  # but a child verb (migrate under update) still takes ITS OWN lock — previously one exported
+  # fd made every child skip locking.
+  [ -n "${!held:-}" ] && return 0
   mkdir -p "$OPENJAWZ_RUN"
-  exec {OJ_LOCK_FD}>"$OPENJAWZ_RUN/$name.lock"
-  flock -n "$OJ_LOCK_FD" || oj::die "openjawz $name: already running"
-  export OJ_LOCK_FD
+  exec {fd}>"$OPENJAWZ_RUN/$name.lock"
+  flock -n "$fd" || oj::die "openjawz $name: already running"
+  export "$held=$fd"
 }
 
 # {{KEY}} → $KEY from identity.env (+ env). Unknown key → die. 0644, or 0600 under $OPENJAWZ_CONFIG.

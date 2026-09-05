@@ -72,4 +72,10 @@ M --list >/dev/null 2>&1 && ok "--list needs no lock" || bad "--list blocked by 
 exec 9>&-
 
 [ "$fail" = 0 ] && echo "migrate: ok"
+# ── per-name lock (round-2 architect): migrate under update must still take its own lock ──
+_l=$(mktemp -d); export OPENJAWZ_RUN="$_l"
+( . lib/openjawz.sh; oj::lock update; ( . lib/openjawz.sh; oj::lock migrate; [ -e "$OPENJAWZ_RUN/migrate.lock" ] && echo "ok   child took migrate.lock under update" || { echo "FAIL child skipped its lock"; exit 1; } ) ) || fail=1
+( . lib/openjawz.sh; oj::lock update; ( . lib/openjawz.sh; oj::lock update && echo "ok   same-name re-entry does not double-lock" ) ) || { echo "FAIL same-name re-entry died"; fail=1; }
+rm -rf "$_l"
+
 exit "$fail"

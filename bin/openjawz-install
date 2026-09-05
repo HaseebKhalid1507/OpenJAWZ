@@ -34,6 +34,9 @@ mkdir -p "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_HOME" "$OPENJAWZ_DATA" 
 case "${OPENJAWZ_REPO:-}" in file://*) printf '%s\n' "${OPENJAWZ_REPO#file://}" > "$OPENJAWZ_CONFIG/local-repo" ;; esac
 # every file written under ~/.synaps-cli goes into the manifest uninstall --purge reads (idempotent)
 manifest="$OPENJAWZ_STATE/installed-files"; touch "$manifest"; touch "$manifest.t0"
+# snapshot what ALREADY existed under ~/.synaps-cli: install may EDIT those (config, mcp.json) but they are the
+# user's — the manifest (what --purge deletes) only ever gets files that did not exist before this run
+find "$SYNAPS_BASE_DIR" -maxdepth 2 -type f 2>/dev/null | sort > "$manifest.pre"
 oj::record() { local p; for p in "$@"; do grep -qxF "$p" "$manifest" || printf '%s\n' "$p" >> "$manifest"; done; }
 oj::log info "openjawz install $(oj::version) — profile=$profile yes=${OPENJAWZ_YES:-0}"
 
@@ -128,7 +131,9 @@ run_stage ambient   via ambient ensure
 run_stage ui        via ui install
 run_stage migrate   st_migrate
 # whatever the other members wrote under ~/.synaps-cli this run (crew roles, system.md, preamble) → manifest
-find "$SYNAPS_BASE_DIR" -maxdepth 2 \( -name '*.md' -o -name mcp.json -o -name config \) -newer "$manifest.t0" 2>/dev/null | while IFS= read -r p; do oj::record "$p"; done
+find "$SYNAPS_BASE_DIR" -maxdepth 2 \( -name '*.md' -o -name mcp.json -o -name config \) -newer "$manifest.t0" 2>/dev/null | sort \
+  | comm -23 - "$manifest.pre" | while IFS= read -r p; do oj::record "$p"; done   # new files only; pre-existing ones are never purged
+rm -f "$manifest.pre"
 rm -f "$manifest.t0"
 echo
 openjawz doctor --brief || true

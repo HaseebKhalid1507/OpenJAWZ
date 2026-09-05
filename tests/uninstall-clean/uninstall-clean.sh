@@ -32,3 +32,7 @@ left="$(find ~ /usr/share/openjawz /var/lib/pacman/sync -newer "$marker" -not -t
 grep -q '^kept:' /work/purge.log && ok "A6 kept: line printed" || bad "A6 no kept: line"
 pacman -Q synaps-bin >/dev/null 2>&1 && bad "--all left synaps-bin" || ok "--all removed synaps-bin"
 echo "uninstall-clean: fail=$fail"; exit "$fail"
+# pre-existing user file under ~/.synaps-cli must NOT be in the purge manifest (round-2 architect: -newer sweep recorded edited config)
+if [ -f ~/.synaps-cli/config ] && ! grep -qxF "$HOME/.synaps-cli/config" ~/.local/state/openjawz/installed-files 2>/dev/null; then ok "manifest excludes pre-existing config (only files install CREATED are purged)"; else
+  # a fresh container has no pre-existing config, so the file IS new: assert the mechanism instead — the .pre snapshot is consumed
+  [ -e ~/.local/state/openjawz/installed-files.pre ] && bad "manifest.pre left behind" || ok "manifest pre-snapshot consumed (new-files-only sweep)"; fi

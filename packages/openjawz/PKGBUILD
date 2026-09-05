@@ -1,0 +1,202 @@
+# Maintainer: OpenJAWZ maintainers <https://github.com/HaseebKhalid1507/OpenJAWZ/issues>
+#
+# Versioning: pre-releases use the ATTACHED form (0.1.0rc1). vercmp orders 0.1.0rc1 < 0.1.0;
+# 0.1.0.rc1 and 0.1.0_rc1 sort AFTER 0.1.0 and strand users on the pre-release.
+#
+# Local build from a checked-out tree:  OPENJAWZ_SRC=/path/to/tree makepkg -sf
+# (the tree must match pkgver; tests/pkg asserts VERSION == pkgver)
+
+pkgbase=openjawz
+pkgname=(openjawz-meta openjawz-core openjawz-daemon openjawz-hooks openjawz-crew openjawz-ops openjawz-brain openjawz-ui)
+pkgver=0.1.0
+pkgrel=1
+arch=('any')
+url='https://github.com/HaseebKhalid1507/OpenJAWZ'
+license=('MIT')
+makedepends=('git')
+if [[ -n ${OPENJAWZ_SRC:-} ]]; then
+  source=()
+  sha256sums=()
+else
+  source=("openjawz::git+$url.git#tag=v$pkgver")
+  sha256sums=('SKIP')
+fi
+
+_cd() { cd "$srcdir/openjawz" || return 1; }
+_lib=usr/lib/openjawz
+_share=usr/share/openjawz
+_units=usr/lib/systemd/user
+
+prepare() {
+  if [[ -n ${OPENJAWZ_SRC:-} ]]; then
+    rm -rf "$srcdir/openjawz"; cp -a "$OPENJAWZ_SRC" "$srcdir/openjawz"
+  fi
+  [[ "$(cat "$srcdir/openjawz/VERSION")" == "$pkgver" ]] || { echo "VERSION $(cat "$srcdir/openjawz/VERSION") != pkgver $pkgver" >&2; return 1; }
+}
+
+# install every executable in $1 (repo dir) as $2/<prefix><name>
+_bins() { # src-dir dest-dir [prefix]
+  local d="$1" dest="$2" p="${3:-}" f
+  [[ -d "$d" ]] || return 0
+  install -d "$dest"
+  for f in "$d"/*; do
+    [[ -f "$f" ]] || continue
+    install -m755 "$f" "$dest/$p$(basename "$f")"
+  done
+}
+_units_from() { # dir
+  local f
+  for f in "$1"/*.service "$1"/*.timer "$1"/*.socket; do
+    [[ -f "$f" ]] && install -Dm644 "$f" -t "$pkgdir/$_units/"
+  done; return 0
+}
+_license() { install -Dm644 "$srcdir/openjawz/LICENSE" "$pkgdir/usr/share/licenses/$1/LICENSE"; }
+
+package_openjawz-meta() {
+  pkgdesc='OpenJAWZ: the operating layer on the Synaps runtime (meta)'
+  depends=('synaps-bin>=0.9.1rc1'
+           "openjawz-core=$pkgver" "openjawz-daemon=$pkgver" "openjawz-hooks=$pkgver"
+           "openjawz-crew=$pkgver" "openjawz-ops=$pkgver" "openjawz-brain=$pkgver" "openjawz-ui=$pkgver")
+  optdepends=('axel-bin: the brain (persistent memory with provenance)'
+              'gum: nicer first-run form'
+              'snapper: snapshot before update on btrfs'
+              'foot: fast terminal for the hotkey'
+              'waybar: bar widget'
+              'libnotify: notifications out'
+              'inotify-tools: fs hook'
+              'socat: desktop hook')
+  _license "$pkgname"
+}
+
+package_openjawz-core() {
+  pkgdesc='OpenJAWZ core: router, lib, install/update/migrate/doctor/uninstall'
+  depends=('bash' 'jq' 'systemd' 'coreutils' 'util-linux')
+  install=openjawz-core.install
+  _cd
+  install -Dm644 lib/openjawz.sh -t "$pkgdir/$_lib/"
+  install -Dm755 bin/openjawz -t "$pkgdir/usr/bin/"
+  install -d "$pkgdir/$_lib/bin"
+  local f
+  for f in bin/openjawz-*; do
+    case "$f" in bin/openjawz-daemon-exec) continue ;; esac
+    install -m755 "$f" -t "$pkgdir/$_lib/bin/"
+  done
+  install -Dm644 VERSION -t "$pkgdir/$_share/"
+  install -d "$pkgdir/$_share/migrations"
+  for f in migrations/[0-9]*-*.sh; do [[ -f "$f" ]] && install -m644 "$f" -t "$pkgdir/$_share/migrations/"; done
+  install -Dm644 migrations/TEMPLATE.sh -t "$pkgdir/$_share/migrations/"
+  # new users start fully migrated
+  install -d "$pkgdir/etc/skel/.local/state/openjawz/migrations"
+  for f in migrations/[0-9]*-*.sh; do [[ -f "$f" ]] && : > "$pkgdir/etc/skel/.local/state/openjawz/migrations/$(basename "$f")"; done
+  [[ -d skel ]] && cp -a skel "$pkgdir/$_share/skel"
+  install -Dm644 packages/openjawz/95-openjawz-migrations.hook -t "$pkgdir/usr/share/libalpm/hooks/"
+  install -Dm644 daemon/openjawz-migrate-notify.service -t "$pkgdir/$_units/"
+  _license "$pkgname"
+}
+
+package_openjawz-daemon() {
+  pkgdesc='OpenJAWZ: synaps-daemon.service (user unit), config defaults, profiles'
+  depends=("openjawz-core=$pkgver" 'synaps-bin' 'systemd')
+  _cd
+  install -Dm644 daemon/synaps-daemon.service -t "$pkgdir/$_units/"
+  install -Dm755 bin/openjawz-daemon-exec -t "$pkgdir/$_lib/bin/"
+  install -Dm644 daemon/config.default daemon/mcp.json.default -t "$pkgdir/$_share/daemon/"
+  install -d "$pkgdir/$_share/daemon/profiles"
+  install -m644 daemon/profiles/*.env -t "$pkgdir/$_share/daemon/profiles/"
+  install -Dm644 daemon/environment.d/10-openjawz.conf -t "$pkgdir/usr/lib/environment.d/"
+  _license "$pkgname"
+}
+
+package_openjawz-hooks() {
+  pkgdesc='OpenJAWZ: OS event bridges (desktop, fs, notify, chronos, system) + the ambient session'
+  depends=("openjawz-core=$pkgver" 'socat' 'inotify-tools' 'dbus' 'libnotify' 'jq')
+  _cd
+  install -d "$pkgdir/$_lib/hooks" "$pkgdir/$_share/hooks"
+  local d
+  for d in desktop fs notify chronos system; do
+    [[ -d hooks/$d ]] || continue
+    _units_from "hooks/$d"
+    local f
+    for f in "hooks/$d"/*; do
+      [[ -f "$f" ]] || continue
+      case "$f" in
+        *.service|*.timer|*.socket) ;;
+        *.default|*.md) install -Dm644 "$f" -t "$pkgdir/$_share/hooks/" ;;
+        *) [[ -x "$f" ]] && install -m755 "$f" -t "$pkgdir/$_lib/hooks/" || install -m644 "$f" -t "$pkgdir/$_lib/hooks/" ;;
+      esac
+    done
+    [[ -d hooks/$d/plugin ]] && { install -d "$pkgdir/$_share/plugins"; cp -a "hooks/$d/plugin" "$pkgdir/$_share/plugins/$d"; }
+  done
+  [[ -f hooks/lib/bridge.sh ]] && install -Dm644 hooks/lib/bridge.sh -t "$pkgdir/$_lib/hooks/"
+  [[ -f hooks/ambient-session.md ]] && install -Dm644 hooks/ambient-session.md -t "$pkgdir/$_share/hooks/"
+  _bins hooks/bin "$pkgdir/$_lib/bin"
+  _units_from hooks
+  [[ -f daemon/openjawz-ambient.service ]] && install -Dm644 daemon/openjawz-ambient.service -t "$pkgdir/$_units/"
+  _license "$pkgname"
+}
+
+package_openjawz-ui() {
+  pkgdesc='OpenJAWZ: hotkey summon, bar widget, theme swatch'
+  depends=("openjawz-core=$pkgver" 'jq')
+  optdepends=('foot: terminal server for the hotkey' 'kitty: terminal fallback' 'waybar: bar widget')
+  _cd
+  install -d "$pkgdir/$_lib/bin" "$pkgdir/$_lib/ui" "$pkgdir/$_share/ui"
+  [[ -f ui/hotkey/openjawz-summon ]] && install -m755 ui/hotkey/openjawz-summon -t "$pkgdir/$_lib/bin/"
+  _bins ui/bin "$pkgdir/$_lib/bin"
+  [[ -f ui/bar/waybar-status ]] && install -m755 ui/bar/waybar-status -t "$pkgdir/$_lib/ui/"
+  local f
+  for f in ui/hotkey/*.conf ui/bar/*.jsonc ui/bar/*.css; do [[ -f "$f" ]] && install -m644 "$f" -t "$pkgdir/$_share/ui/"; done
+  [[ -d ui/bar/quickshell ]] && cp -a ui/bar/quickshell "$pkgdir/$_share/ui/"
+  [[ -d ui/themes ]] && cp -a ui/themes "$pkgdir/$_share/ui/"
+  _license "$pkgname"
+}
+
+package_openjawz-crew() {
+  pkgdesc='OpenJAWZ: the crew — role files, playbooks, subagent preamble'
+  depends=("openjawz-core=$pkgver")
+  _cd
+  install -d "$pkgdir/$_share/crew"
+  local d
+  for d in agents flavors playbooks; do [[ -d crew/$d ]] && cp -a "crew/$d" "$pkgdir/$_share/crew/"; done
+  [[ -f crew/subagent-preamble.md ]] && install -m644 crew/subagent-preamble.md -t "$pkgdir/$_share/crew/"
+  _bins crew/tools "$pkgdir/$_lib/tools" openjawz-
+  _bins crew/bin "$pkgdir/$_lib/bin"
+  _license "$pkgname"
+}
+
+package_openjawz-ops() {
+  pkgdesc='OpenJAWZ: templates, skills, tools, the discipline (boot / checkpoint / shutdown)'
+  depends=("openjawz-core=$pkgver" 'python')
+  optdepends=('gum: first-run form' 'yt-dlp: the yt tool')
+  _cd
+  install -d "$pkgdir/$_share/ops" "$pkgdir/$_lib/tools"
+  local d
+  for d in templates skills boot.d; do [[ -d ops/$d ]] && cp -a "ops/$d" "$pkgdir/$_share/ops/"; done
+  local f
+  for f in ops/sacred-files ops/TOOLMAKING.md; do [[ -f "$f" ]] && install -m644 "$f" -t "$pkgdir/$_share/ops/"; done
+  _bins ops/tools "$pkgdir/$_lib/tools" openjawz-
+  [[ -d ops/tools/lib ]] && cp -a ops/tools/lib "$pkgdir/$_lib/tools/lib"
+  _bins ops/bin "$pkgdir/$_lib/bin"
+  if [[ -d plugins ]]; then
+    install -d "$pkgdir/$_share/plugins"
+    for d in plugins/*/; do cp -a "$d" "$pkgdir/$_share/plugins/"; done
+  fi
+  _license "$pkgname"
+}
+
+package_openjawz-brain() {
+  pkgdesc='OpenJAWZ: memory policy, consolidation timer, brain init'
+  depends=("openjawz-core=$pkgver" 'python')
+  optdepends=('axel-bin: the memory engine itself')
+  _cd
+  install -d "$pkgdir/$_share/brain"
+  _units_from brain
+  local f
+  for f in brain/memory-policy.md brain/secret-patterns.txt brain/sources.toml.default brain/last-consolidation.sh; do
+    [[ -e "$f" ]] || continue
+    if [[ -L "$f" ]]; then cp -L "$f" "$pkgdir/$_share/brain/$(basename "$f")"; chmod 644 "$pkgdir/$_share/brain/$(basename "$f")"
+    else install -m644 "$f" -t "$pkgdir/$_share/brain/"; fi
+  done
+  _bins brain/bin "$pkgdir/$_lib/bin"
+  _license "$pkgname"
+}

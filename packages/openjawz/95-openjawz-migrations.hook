@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/share/openjawz/migrations/*
+
+[Action]
+Description = OpenJAWZ: migrations shipped — run 'openjawz migrate' as your user
+When = PostTransaction
+Depends = openjawz-core
+Exec = /usr/bin/sh -c 'echo "==> openjawz: new migrations shipped; run: openjawz migrate"'

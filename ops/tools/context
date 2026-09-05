@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+# openjawz-context: context lifecycle — active/full split, prune stale, restore archived
+# usage: openjawz context audit|prune|restore|stats|diff ...
+# owner: openjawz-ops
+# ci: fast
 """
-context - Context lifecycle management for the agent engram
+context - Context lifecycle management for the engram
 Manages the active/full context split, pruning stale items and restoring archived ones.
 """
 

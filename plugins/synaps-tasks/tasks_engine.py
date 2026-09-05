@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 DATA_DIR = os.environ.get("OPENJAWZ_DATA") or os.path.join(
-    os.environ.get("OPENJAWZ_HOME", os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "openjawz")), "data")
+    os.environ.get("OPENJAWZ_HOME", os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")), "openjawz")), "data")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 HISTORY_FILE = os.path.join(DATA_DIR, "tasks_history.json")
 PINS_FILE = os.path.join(DATA_DIR, "pins.json")

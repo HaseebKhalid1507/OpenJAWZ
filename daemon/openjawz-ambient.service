@@ -3,6 +3,10 @@ Description=OpenJAWZ ambient session (ensure it exists after the daemon is up)
 Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ
 After=synaps-daemon.service
 Wants=synaps-daemon.service
+# lives and dies with the daemon: a daemon restart (crash, update) stops this unit, and the
+# daemon's Upholds= starts it again → `ambient ensure` re-runs → the session is back.
+BindsTo=synaps-daemon.service
+PartOf=synaps-daemon.service
 
 [Service]
 Type=oneshot
@@ -10,7 +14,8 @@ RemainAfterExit=yes
 EnvironmentFile=-%E/openjawz/profile.env
 EnvironmentFile=-%E/openjawz/env
 ExecStart=/usr/bin/openjawz ambient ensure
-TimeoutStartSec=90
+# ensure's worst case: daemon start 10 s + --continue 40 s + --create 60 s = 110 s
+TimeoutStartSec=130
 
 [Install]
 WantedBy=default.target

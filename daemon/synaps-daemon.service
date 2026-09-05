@@ -2,6 +2,8 @@
 Description=Synaps daemon (OpenJAWZ)
 Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ
 StartLimitIntervalSec=0
+# every time the daemon is (re)started, the ambient session is re-ensured
+Upholds=openjawz-ambient.service
 
 [Service]
 Type=simple

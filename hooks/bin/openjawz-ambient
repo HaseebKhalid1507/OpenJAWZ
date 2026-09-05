@@ -102,6 +102,7 @@ cmd_send() {
   . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
     || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/bridge.sh"
   bridge::init ui
+  export OPENJAWZ_HOOK_BYPASS_PAUSE=1   # a human command is not a hook: hooks.paused does not apply
   bridge::emit message low "$*"
 }
 

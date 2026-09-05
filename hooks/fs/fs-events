@@ -33,9 +33,17 @@ done < "$list"
 [ "${#dirs[@]}" -gt 0 ] || bridge::skip "watch.list matched no directories"
 
 limit=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 8192)
+# the advice names a value that would actually help: max(524288, 2×current), never the current one
+fs::advice() {
+  local want=$((limit * 2)) inuse
+  [ "$want" -lt 524288 ] && want=524288
+  inuse=$(find /proc/[0-9]*/fdinfo -type f -exec grep -ls '^inotify' {} + 2>/dev/null | wc -l)
+  oj::log err "fs: raise it:  sudo sysctl -w fs.inotify.max_user_watches=$want   (persist in /etc/sysctl.d/40-openjawz.conf)"
+  oj::log err "fs: or trim watch.list ($list): this bridge wants ${#dirs[@]} watches; ~$inuse inotify instances are open on the box"
+}
 if [ "${#dirs[@]}" -ge "$limit" ]; then
   oj::log err "fs: ${#dirs[@]} directories > fs.inotify.max_user_watches=$limit"
-  oj::log err "fs: raise it:  sudo sysctl -w fs.inotify.max_user_watches=524288   (persist in /etc/sysctl.d/40-openjawz.conf) — or trim watch.list"
+  fs::advice
   exit 78
 fi
 oj::log info "fs: watching ${#dirs[@]} directories from $list"
@@ -60,7 +68,7 @@ rc=$?
 set -e
 if grep -q 'upper limit on inotify watches' "$errlog" 2>/dev/null; then
   oj::log err "fs: inotify watch limit reached (fs.inotify.max_user_watches=$limit)"
-  oj::log err "fs: raise it:  sudo sysctl -w fs.inotify.max_user_watches=524288   (persist in /etc/sysctl.d/40-openjawz.conf) — or trim watch.list"
+  fs::advice
   exit 78
 fi
 [ -s "$errlog" ] && oj::log warn "fs: $(head -c 300 "$errlog")"

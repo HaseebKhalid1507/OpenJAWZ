@@ -2,6 +2,9 @@
 # openjawz hook: notify (in) — every org.freedesktop.Notifications.Notify on the session bus → "notification: app=… summary=… body=…"
 # Works with any notification daemon (mako, dunst, swaync, …): we watch the bus, not the daemon. Idle: dbus-monitor 2.5 MB + bash 4 MB.
 # Our own toasts (app OpenJAWZ) are skipped so the ambient session never hears itself.
+# Governed ingress: apps in notify.deny are dropped whole; the BODY is forwarded only when
+# hooks.notify.body = on (~/.synaps-cli/config) or OPENJAWZ_NOTIFY_BODY=1 — default is titles only;
+# every line still passes bridge::emit's secret/OTP filter.
 set -euo pipefail
 # shellcheck source=hooks/lib/bridge.sh
 . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
@@ -31,14 +34,25 @@ notify::awk() {
   '
 }
 
+DENY=${OPENJAWZ_NOTIFY_DENY:-$(bridge::cfg hooks.notify.deny "$(bridge::share_file notify.deny || true)")}
+BODY=${OPENJAWZ_NOTIFY_BODY:-$(bridge::cfg hooks.notify.body off)}
+case $BODY in 1|on|yes|true) BODY=on ;; *) BODY=off ;; esac
+_denied=0
 notify::parse() {
   local app summary body
   while IFS=$'\t' read -r app summary body; do
     [ "$app" = OpenJAWZ ] && continue
-    body=${body//$'\n'/ }
-    [ "${#body}" -gt 160 ] && body="${body:0:157}…"
-    bridge::event notification low "app=$app" "summary=$summary" "body=$body"
+    if bridge::listed "$DENY" "$app"; then _denied=$((_denied + 1)); continue; fi
+    if [ "$BODY" = on ]; then
+      body=${body//$'\n'/ }
+      [ "${#body}" -gt 160 ] && body="${body:0:157}…"
+      bridge::event notification low "app=$app" "summary=$summary" "body=$body"
+    else
+      bridge::event notification low "app=$app" "summary=$summary"
+    fi
   done
+  [ "$_denied" -gt 0 ] && oj::log info "notify: dropped $_denied events (notify.deny)"
+  return 0
 }
 
 if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then

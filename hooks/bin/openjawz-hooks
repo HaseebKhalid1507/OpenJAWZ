@@ -71,18 +71,26 @@ cmd_enable() {
   exit $rc
 }
 
+installed() { [ "$(sc show -p LoadState --value "$1" 2>/dev/null)" = loaded ]; }
+
 cmd_disable() {
-  local names n u
+  local names n u rc=0 err
   oj::have systemctl || exit 0
   names=$(names_or_default "$@")
   for n in $names; do
-    known "$n" || continue
+    known "$n" || { rc=1; continue; }
     u=$(unit_of "$n")
-    sc disable --now "$u" >/dev/null 2>&1 || true
-    oj::log ok "hook $n: disabled"
+    if ! installed "$u"; then oj::log info "hook $n: not installed ($u)"; continue; fi
+    if err=$(sc disable --now "$u" 2>&1); then
+      oj::log ok "hook $n: disabled"
+    else
+      oj::log err "hook $n: disable failed: ${err##*$'\n'}"; rc=1
+    fi
   done
-  [ $# -eq 0 ] && { sc disable --now "$TARGET" >/dev/null 2>&1 || true; }
-  exit 0
+  if [ $# -eq 0 ] && installed "$TARGET"; then
+    sc disable --now "$TARGET" >/dev/null 2>&1 || { oj::log err "$TARGET: disable failed"; rc=1; }
+  fi
+  exit $rc
 }
 
 cmd_status() {
@@ -92,11 +100,18 @@ cmd_status() {
   printf '%-8s %-32s %-10s %s\n' hook unit state note
   for n in $ALL; do
     u=$(unit_of "$n")
+    if ! installed "$u"; then
+      printf '%-8s %-32s %-10s %s\n' "$n" "$u" "-" "not installed"; continue
+    fi
     state=$(sc show -p ActiveState --value "$u" 2>/dev/null || echo unknown)
     sub=$(sc show -p SubState --value "$u" 2>/dev/null || true)
-    cond=$(sc show -p ConditionResult --value "$u" 2>/dev/null || true)
     note=
-    [ "$cond" = no ] && note="condition failed (no WAYLAND_DISPLAY in the user manager)"
+    case " $WAYLAND " in *" $n "*)   # only these units carry ConditionEnvironment=WAYLAND_DISPLAY
+      cond=$(sc show -p ConditionResult --value "$u" 2>/dev/null || true)
+      # ConditionResult is "no" until the first start attempt: only trust it once it was evaluated
+      [ -n "$(sc show -p ConditionTimestampMonotonic --value "$u" 2>/dev/null | tr -d 0)" ] || cond=
+      [ "$cond" = no ] && [ "$state" != active ] && note="condition failed (no WAYLAND_DISPLAY in the user manager)" ;;
+    esac
     sc -q is-enabled "$u" 2>/dev/null || note="${note:-disabled}"
     [ "$state" = failed ] && note="failed: journalctl --user -u $u"
     printf '%-8s %-32s %-10s %s\n' "$n" "$u" "$state${sub:+/$sub}" "$note"

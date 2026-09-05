@@ -1,7 +1,9 @@
 /* OpenJAWZ Waybar states — @import this or copy into style.css */
 #custom-openjawz { padding: 0 8px; }
-#custom-openjawz.idle    { color: #a6adc8; }
-#custom-openjawz.busy    { color: #a6e3a1; }
-#custom-openjawz.parked  { color: #6c7086; }
-#custom-openjawz.off     { color: #585b70; }
-#custom-openjawz.pending { border-bottom: 2px solid #f9e2af; }
+#custom-openjawz.off      { color: #585b70; }
+#custom-openjawz.empty    { color: #6c7086; }
+#custom-openjawz.parked   { color: #6c7086; }
+#custom-openjawz.idle     { color: #a6adc8; }
+#custom-openjawz.attached { color: #89b4fa; }
+#custom-openjawz.busy     { color: #a6e3a1; }
+#custom-openjawz.pending  { border-bottom: 2px solid #f9e2af; }

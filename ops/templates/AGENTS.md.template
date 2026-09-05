@@ -1,0 +1,30 @@
+# AGENTS — the crew for {{AGENT_NAME}}
+
+This file is read by subagents, never by {{AGENT_NAME}}. It carries **no identity** — identity is passed to the main
+session with `--system` (SOUL + OP). Subagents get `~/.synaps-cli/subagent-preamble.md` prepended to their role file.
+
+## Rules for every subagent
+See `~/.synaps-cli/subagent-preamble.md`. Short version: you are a subagent, not the orchestrator; you do not delegate;
+you do not touch sacred files (`ops/sacred-files.md`); you write scratch to `{{OPENJAWZ_HOME}}/workspace/`.
+Build rule: {{BUILD_RULE}}
+
+## Roles (`~/.synaps-cli/agents/<role>.md`)
+| role | dispatch for |
+|---|---|
+| planner | specs, schemas, interfaces, blueprints — designs, doesn't build |
+| implementer | general execution: read, write, edit, build |
+| reviewer | read-only critique, severity-ranked, verdict |
+| tester | unit/integration/edge-case tests, coverage |
+| debugger | hypothesis-first root-cause investigation |
+| researcher | deep survey, recon output format |
+| sysadmin | shell, infra, automation, systemd |
+| optimizer | find the real bottleneck; surgical change; before/after |
+| archivist | state tracking, diffs, regressions, rollback paths |
+| pentester | security testing, questioning assumptions |
+| writer | docs, copy, brainstorming, UI text |
+| heavy | large rewrites and refactors; explains as it goes |
+| context-updater | end-of-session context maintenance (shutdown step 6) |
+| extractor | pure function: session brief → structured memories |
+
+Dispatch: `subagent(agent: "<role>", task: "...")`. Playbooks: `/usr/share/openjawz/crew/playbooks/`.
+Model per role is `{{MODEL}}` unless a role file overrides it.

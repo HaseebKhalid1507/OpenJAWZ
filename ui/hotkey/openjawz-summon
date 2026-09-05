@@ -6,7 +6,7 @@
 #
 # Hot path, ~100 ms: no jq, no daemon round-trip. Terminal choice is cached by `openjawz ui install`
 # in $XDG_RUNTIME_DIR/openjawz/term (footclient → foot → kitty → ghostty → $TERMINAL).
-#   default  Hyprland: toggle special:jawz if a window of class `openjawz` exists, else launch (rule places it there)
+#   default  Hyprland: toggle special:openjawz if a window of class `openjawz` exists, else launch (rule places it there)
 #   --focus  focus the existing window in place instead of the special workspace (tiled users)
 #   --new    always a fresh session (`synaps --attach --new`); default attaches to the sole live session or creates
 set -euo pipefail
@@ -21,7 +21,7 @@ done
 
 rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 cache=$rt/openjawz/term
-CLASS=openjawz WS=jawz
+CLASS=openjawz WS=openjawz
 
 # ── an agent window already exists? ─────────────────────────────────────────
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -d "$rt/hypr" ]; then

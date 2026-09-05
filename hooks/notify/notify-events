@@ -19,7 +19,7 @@ command -v dbus-monitor >/dev/null || bridge::skip "dbus-monitor not installed"
 #      string "body"
 # The awk state machine collects the four strings after a Notify header and emits one TSV line.
 notify::awk() {
-  awk '
+  exec awk '
     /member=Notify$/ { n=0; inmsg=1; next }
     inmsg && /^   string "/ {
       s=$0; sub(/^   string "/, "", s); sub(/"$/, "", s); gsub(/\t/, " ", s)
@@ -44,5 +44,5 @@ notify::parse() {
 if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
   notify::awk < "$OPENJAWZ_HOOK_REPLAY" | notify::parse
 else
-  dbus-monitor --session "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" | notify::awk | notify::parse
+  notify::parse < <(dbus-monitor --session "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" | notify::awk)
 fi

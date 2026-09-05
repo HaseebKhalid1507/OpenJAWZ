@@ -41,5 +41,5 @@ hypr::parse() {
 if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
   hypr::parse < "$OPENJAWZ_HOOK_REPLAY"     # tests: a recorded stream instead of the socket
 else
-  socat -u UNIX-CONNECT:"$sock" - | hypr::parse
+  hypr::parse < <(exec socat -u UNIX-CONNECT:"$sock" -)
 fi

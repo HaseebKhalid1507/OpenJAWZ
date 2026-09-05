@@ -26,7 +26,7 @@ active_connection() {
 }
 
 system::awk() {
-  awk '
+  exec awk '
     /member=StateChanged/ && /NetworkManager/ { want="net"; next }
     /member=PrepareForSleep/               { want="sleep"; next }
     want=="net"   && /^   uint32 /  { print "net\t" $2; want=""; fflush(); next }
@@ -71,5 +71,5 @@ rules=("type='signal',sender='org.freedesktop.NetworkManager',interface='org.fre
 if [ "${OPENJAWZ_HOOK_USB:-0}" = 1 ] && command -v udevadm >/dev/null; then
   { dbus-monitor --system "${rules[@]}" | system::awk & usb::monitor & wait; } | system::parse
 else
-  dbus-monitor --system "${rules[@]}" | system::awk | system::parse
+  system::parse < <(dbus-monitor --system "${rules[@]}" | system::awk)
 fi

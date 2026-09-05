@@ -55,9 +55,8 @@ fs::parse() {
 errlog=$(mktemp -t openjawz-fs.XXXXXX)
 trap 'rm -f "$errlog"' EXIT
 set +e
-inotifywait -m -q -e create,close_write,moved_to,delete --format "%w%f${TAB}%e" --exclude "$EXCLUDE" "${dirs[@]}" \
-  2>"$errlog" | fs::parse
-rc=${PIPESTATUS[0]}
+fs::parse < <(exec inotifywait -m -q -e create,close_write,moved_to,delete --format "%w%f${TAB}%e" --exclude "$EXCLUDE" "${dirs[@]}" 2>"$errlog")
+rc=$?
 set -e
 if grep -q 'upper limit on inotify watches' "$errlog" 2>/dev/null; then
   oj::log err "fs: inotify watch limit reached (fs.inotify.max_user_watches=$limit)"

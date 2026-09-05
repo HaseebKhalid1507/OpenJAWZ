@@ -31,5 +31,5 @@ filter='[
 if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
   jq -r "$filter" < "$OPENJAWZ_HOOK_REPLAY" | sway::parse
 else
-  swaymsg -t subscribe -m '["window","workspace","output"]' | jq --unbuffered -r "$filter" | sway::parse
+  sway::parse < <(swaymsg -t subscribe -m '["window","workspace","output"]' | exec jq --unbuffered -r "$filter")
 fi

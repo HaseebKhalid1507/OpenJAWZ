@@ -59,7 +59,7 @@ From the three handoffs and PLAN §9:
   but unexercised; `tests/hooks/sway-headless.sh` written, not executed in a container; memprof `gates.sh`
   real run on the hardware box; quickshell note; hotkey timing on real Hyprland.
 - **C**: tools batch 2 (toolmake, tools-doc, maintain, backup, yt, web, tracker); the 12 lifted skills
-  (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`; whiptail fallback for onboard.
+  (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`.
 - Derivative-distro matrix entry (`ID_LIKE=arch` os-release override in the smoke).
 - Gauntlet round 2 (round 1: see "Gauntlet" below) → summarised in `docs/gauntlet/summary.md` (committed).
 

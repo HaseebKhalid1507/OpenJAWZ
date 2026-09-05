@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# openjawz hook: chronos — hourly tick from openjawz-chronos.timer → "tick: time=HH:00 date=YYYY-MM-DD dow=Mon"
+# Idle: 0 (a systemd timer; this runs for ~50 ms once an hour).
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init chronos
+bridge::event tick low "time=$(date +%H:%M)" "date=$(date +%F)" "dow=$(date +%a)" "tz=$(date +%Z)"

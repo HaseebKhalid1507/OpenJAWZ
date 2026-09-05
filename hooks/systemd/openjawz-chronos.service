@@ -1,0 +1,8 @@
+[Unit]
+Description=OpenJAWZ hook: chronos tick
+After=openjawz-ambient.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/openjawz/hooks/chronos-tick
+Slice=background.slice

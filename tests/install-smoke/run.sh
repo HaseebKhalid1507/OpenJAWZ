@@ -28,5 +28,5 @@ res="$(cat "$work/result" 2>/dev/null || echo "container-died")"
 echo; echo "install-smoke: result=$res  $(cat "$work/summary" 2>/dev/null)"
 [ "${KEEP:-0}" = 1 ] && { echo "uninstall-clean:"; cat "$work/uninstall.log" 2>/dev/null; }
 [ "$res" = "done" ] || exit 1
-read -r _ boot _ arc _ secs < <(sed 's/[a-z]*=//g' "$work/summary")
+read -r boot arc secs < <(sed 's/[a-z]*=//g' "$work/summary")
 [ "$boot" = 0 ] && [ "$arc" = 0 ] && [ "$secs" -lt 600 ]

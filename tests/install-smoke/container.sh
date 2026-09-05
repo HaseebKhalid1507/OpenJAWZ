@@ -12,7 +12,7 @@ mkdir -p "$HOME/pkgcache"
 cat > "$work/oj-smoke.service" <<'UNIT'
 [Unit]
 Description=OpenJAWZ install-smoke driver
-After=multi-user.target
+After=basic.target dbus.service
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /work/driver.sh

@@ -1,0 +1,22 @@
+# hooks/notify/notify.deny — notifications from these apps never reach the ambient session (whole event dropped).
+# One app_name or desktop-entry per line, case-insensitive, globs allowed. Override: hooks.notify.deny = <file>
+# in ~/.synaps-cli/config, or OPENJAWZ_NOTIFY_DENY=<file>.
+kdeconnect
+org.kde.kdeconnect*
+kde connect
+signal
+org.signal.Signal
+1password
+com.1password.*
+bitwarden
+com.bitwarden.*
+keepassxc
+org.keepassxc.*
+org.gnome.Keyring
+gnome-keyring
+authy
+com.authy.*
+ente
+io.ente.*
+aegis
+proton pass

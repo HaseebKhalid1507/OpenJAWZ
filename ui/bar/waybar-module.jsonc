@@ -7,7 +7,7 @@
     "interval": 10,
     "signal": 8,
     "format": "{icon} {text}",
-    "format-icons": { "idle": "", "busy": "", "parked": "", "off": "" },
+    "format-icons": { "off": "", "empty": "", "parked": "", "idle": "", "attached": "", "busy": "" },
     "on-click": "openjawz summon",
     "on-click-right": "openjawz summon --new",
     "exec-on-event": true,

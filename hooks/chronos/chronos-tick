@@ -6,4 +6,6 @@ set -euo pipefail
 . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
   || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
 bridge::init chronos
+# the vm profile runs with SYNAPS_DAEMON_AUTOSPAWN=0 and idle-exit: the tick is what brings the managed daemon back
+[ "${OPENJAWZ_HOOK_DRY:-0}" = 1 ] || ! oj::have openjawz || { openjawz ambient ensure >/dev/null 2>&1 || oj::log warn "chronos: ambient ensure failed; sending anyway"; }
 bridge::event tick low "time=$(date +%H:%M)" "date=$(date +%F)" "dow=$(date +%a)" "tz=$(date +%Z)"

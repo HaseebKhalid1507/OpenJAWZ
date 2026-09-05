@@ -124,20 +124,24 @@ oj::daemon_alive() { synaps daemon status >/dev/null 2>&1; }
 oj::ambient_id() { cat "$OPENJAWZ_STATE/ambient.id" 2>/dev/null || return 1; }
 # the ambient session is addressed by NAME (runtime names at create); the id cache is the fallback
 oj::ambient_target() { printf '%s\n' "${OPENJAWZ_AMBIENT:-ambient}"; }
-# oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — one event, one connection, always --session, never --broadcast
+# oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — THE delivery leg (the only `synaps send` in the tree).
+# Targets the session by NAME (--session ambient); the cached id (ambient.id) is the fallback.
+# Exit 0 from `send` also covers the inbox fallback — stderr is the truth: returns 1 (and logs) on
+# inbox / No session / no daemon / daemon unavailable, so the caller can re-ensure and retry.
 oj::send() {
-  local src="$1" ct="$2" sev="$3" text="$4" id err
-  id="$(oj::ambient_target)"
-  err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)" || {
-    if id="$(oj::ambient_id)"; then
-      err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)" || {
-        oj::log warn "send: $err"; return 1; }
-    else
-      oj::log warn "send: $err"; return 1
+  local src="$1" ct="$2" sev="$3" text="$4" target err id
+  target="$(oj::ambient_target)"
+  if id="$(oj::ambient_id)" && [ "$id" != "$target" ]; then target="$target $id"; fi
+  for id in $target; do
+    if err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)"; then
+      case "$err" in
+        *inbox*|*"No session"*|*"no daemon"*|*"daemon unavailable"*) ;;   # rc 0 but undelivered: try the next target
+        *) return 0 ;;
+      esac
     fi
-  }
-  case "$err" in *inbox*) oj::log warn "send: fell to inbox: $err"; return 1 ;; esac
-  return 0
+  done
+  oj::log warn "send: undelivered: ${err:-no answer}"
+  return 1
 }
 oj::json_escape() { printf '%s' "$1" | jq -Rr @json; }
 

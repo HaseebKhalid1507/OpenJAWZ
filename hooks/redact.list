@@ -1,0 +1,10 @@
+# hooks/redact.list — extra content-filter patterns for the hook ingress (grep -E, one per line, case-insensitive).
+# A line that matches ANY pattern here, in brain/secret-patterns.txt, or the built-in OTP shapes is replaced
+# by "[redacted: secret-shaped] (…)" before it leaves the bridge. Override the file: OPENJAWZ_HOOK_REDACT_LIST=<path>.
+# Apps whose every notification is a secret belong in notify.deny instead (the whole event is dropped).
+\b(1password|bitwarden|keepass(xc)?|authy|ente auth|aegis|proton pass|lastpass|dashlane)\b
+\b(your|the) (code|pin|token) (is|:)
+\b(iban|routing number|account (number|ending)|card ending|cvv|cvc|sort code)\b
+\b(bank|banking|chase|wells fargo|barclays|hsbc|revolut|monzo|paypal|venmo|payoneer)\b
+\b(passwor[dt]|passphrase|recovery (key|phrase|code)|backup code|seed phrase)\b
+\bpin[: ]+[0-9]{4,}\b

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# openjawz-waybar-status: `openjawz waybar-status` → the bar module (ui/waybar-status), for a manual look
+# usage: openjawz waybar-status
+# owner: openjawz-ui
+# ci: fast
+set -euo pipefail
+s=${OPENJAWZ_LIB:-/usr/lib/openjawz}/ui/waybar-status
+[ -x "$s" ] || s=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bar/waybar-status
+exec "$s" "$@"

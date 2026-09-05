@@ -6,6 +6,7 @@ set -euo pipefail
 . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
   || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
 bridge::init desktop
+REDACT=${OPENJAWZ_TITLE_REDACT:-$(bridge::share_file title.redact || true)}
 
 rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 sig=${HYPRLAND_INSTANCE_SIGNATURE:-}
@@ -18,13 +19,15 @@ sock=$rt/hypr/$sig/.socket2.sock
 command -v socat >/dev/null || bridge::skip "socat not installed"
 
 hypr::parse() {
-  local line ev data
+  local line ev data class title
   while IFS= read -r line; do
     ev=${line%%>>*}; data=${line#*>>}
     case $ev in
       activewindow)
         [ -n "$data" ] || continue                       # empty = focus left all windows
-        bridge::event focus low "class=${data%%,*}" "title=${data#*,}" ;;
+        class=${data%%,*}; title=${data#*,}
+        bridge::listed "$REDACT" "$class" && title="$class window"   # browsers: the title is the secret
+        bridge::event focus low "class=$class" "title=$title" ;;
       workspacev2)
         bridge::event workspace low "id=${data%%,*}" "name=${data#*,}" ;;
       focusedmonv2)

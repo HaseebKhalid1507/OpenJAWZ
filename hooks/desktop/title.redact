@@ -1,0 +1,22 @@
+# hooks/desktop/title.redact — window classes whose TITLE is never forwarded (the bridge sends "title=<class window>").
+# Browsers carry bank/account/mail titles. One class or app_id per line, case-insensitive, globs allowed.
+# Override: OPENJAWZ_TITLE_REDACT=<file>.
+firefox
+firefox-*
+org.mozilla.firefox
+chromium
+chromium-browser
+org.chromium.Chromium
+chrome
+google-chrome*
+brave
+brave-browser
+com.brave.Browser
+librewolf
+zen
+zen-*
+app.zen_browser.zen
+vivaldi*
+microsoft-edge*
+signal
+org.signal.Signal

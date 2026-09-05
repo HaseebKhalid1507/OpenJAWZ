@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# openjawz-waybar-status: one JSON line for a Waybar custom module (sessions · lifecycle · owner · memory)
-# usage: waybar exec; also `openjawz waybar-status` for a manual look
+# waybar-status: one JSON line for a Waybar custom module (sessions · lifecycle · owner · memory)
+# usage: waybar exec /usr/lib/openjawz/ui/waybar-status; also `openjawz waybar-status` for a manual look
 # owner: openjawz-ui
 # ci: fast
 #
-# Contract: {"text","alt","class":[…],"tooltip"} on one line. class ∈ off|parked|idle|busy (+ "pending" when
-# migrations wait, cached 60 s). NEVER touches the daemon socket while synaps-daemon.service is inactive —
-# a poll must not wake anything. Memory = `synaps status --memory --json --pid <daemon.pid>` (one tree,
-# correct totals; bare --memory counts the daemon once per session).
+# Contract: {"text","alt","class":[…],"tooltip"} on one line. class ∈ off|empty|parked|idle|attached|busy
+# (+ "pending" when migrations wait, cached 60 s).
+#   off      daemon not running — unit inactive, or (no unit) `synaps daemon status` ≠ 0 (a stale socket is off, not idle)
+#   empty    daemon up, zero sessions
+#   parked   only parked sessions
+#   idle     a live session, nobody typing, no turn in flight
+#   attached a terminal owns a live session's input (a human is there — not "work")
+#   busy     ONLY when the runtime reports a turn in flight (`turn_active`/`streaming`); omitted otherwise
+# NEVER touches the daemon socket while synaps-daemon.service is inactive — a poll must not wake anything;
+# with no unit, `daemon status` is the probe (it never auto-spawns). Memory = `synaps status --memory --json
+# --pid <daemon.pid>` (one tree, correct totals; bare --memory counts the daemon once per session).
 set -uo pipefail
 _lib=${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh
 [ -r "$_lib" ] || _lib=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/openjawz.sh
@@ -28,21 +35,22 @@ pending_class() {
   [ "$(cat "$cache" 2>/dev/null)" = 1 ] && echo ',"pending"' || true
 }
 
-unit_active=1
-if oj::have systemctl && systemctl --user list-unit-files synaps-daemon.service >/dev/null 2>&1; then
-  systemctl --user -q is-active synaps-daemon.service 2>/dev/null || unit_active=0
-elif [ ! -S "$SYNAPS_RUN/daemon.sock" ]; then
-  unit_active=0
+alive=1
+if oj::have systemctl && systemctl --user list-unit-files synaps-daemon.service 2>/dev/null | grep -q '^synaps-daemon.service'; then
+  systemctl --user -q is-active synaps-daemon.service 2>/dev/null || alive=0
 fi
-if [ "$unit_active" = 0 ]; then
+# the file is not the daemon: probe (daemon status detects a dead pid and never spawns)
+[ "$alive" = 1 ] && { SYNAPS_DAEMON_AUTOSPAWN=0 timeout 3 synaps daemon status >/dev/null 2>&1 || alive=0; }
+if [ "$alive" = 0 ]; then
   out "" off "[\"off\"$(pending_class)]" "daemon off — summon starts it"; exit 0
 fi
 
-sessions=$(timeout 3 synaps daemon sessions --json 2>/dev/null) || sessions='[]'
-[ -n "$sessions" ] || sessions='[]'
+sessions=$(SYNAPS_DAEMON_AUTOSPAWN=0 timeout 3 synaps daemon sessions --json 2>/dev/null) || sessions='[]'
+jq -e 'type=="array"' <<<"$sessions" >/dev/null 2>&1 || sessions='[]'
 live=$(jq '[.[]|select(.lifecycle=="live")]|length' <<<"$sessions")
 parked=$(jq '[.[]|select(.lifecycle=="parked" or .lifecycle=="parking")]|length' <<<"$sessions")
-busy=$(jq '[.[]|select(.lifecycle=="live" and .clients>0 and .input_owner!=null)]|length' <<<"$sessions")
+attached=$(jq '[.[]|select(.lifecycle=="live" and .clients>0 and .input_owner!=null)]|length' <<<"$sessions")
+busy=$(jq '[.[]|select(.lifecycle=="live" and ((.turn_active // .streaming // .busy // false)==true))]|length' <<<"$sessions")
 
 mem=""
 pidf=$SYNAPS_RUN/daemon.pid
@@ -52,11 +60,12 @@ if [ -r "$pidf" ]; then
 fi
 
 if   [ "$busy" -gt 0 ]; then state=busy
+elif [ "$attached" -gt 0 ]; then state=attached
 elif [ "$live" -gt 0 ]; then state=idle
 elif [ "$parked" -gt 0 ]; then state=parked
-else state=idle; fi
+else state=empty; fi
 
-text="$live live · $parked parked${mem:+ · $mem}"
+if [ "$state" = empty ]; then text="no sessions${mem:+ · $mem}"; else text="$live live · $parked parked${mem:+ · $mem}"; fi
 tip=$(jq -r '.[] | "\(.id)  \(.lifecycle)  clients=\(.clients)  owner=\(.input_owner // "-")  \(.name // "")"' <<<"$sessions" | paste -sd '\r' -)
 [ -n "$tip" ] || tip="no sessions"
 out "$text" "$state" "[\"$state\"$(pending_class)]" "$tip"

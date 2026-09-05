@@ -9,7 +9,7 @@ Integration pass on `main` (A + B + C merged), tests run on the build box agains
 |---|---|---|---|
 | `tests/grep-guard` | fast | **PASS** | 0.1 s |
 | `tests/lint` | fast | **PASS** | 6.5 s |
-| `tests/pkg` | fast | **PASS** (namcap on built packages: 0 errors) | 0.1 s |
+| `tests/pkg` | fast | **PASS** (namcap on PKGBUILD sources: no `E:`; `openjawz-keyring` carries a known built-package `E` until key material lands — see below) | 0.1 s |
 | `tests/templates` | fast | **PASS** | 0.1 s |
 | `tests/tools` | fast | **PASS** | 1.2 s |
 | `tests/hooks` | container | **PASS** — event delivered, ambient live (delivery leg; toast leg by `openjawz notify` directly) | 104 s |

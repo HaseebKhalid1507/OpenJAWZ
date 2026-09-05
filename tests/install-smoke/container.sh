@@ -4,7 +4,9 @@
 # No `docker exec` — ever. See README.md.
 set -euo pipefail
 name="$1"; work="$2"
-image="${OPENJAWZ_SMOKE_IMAGE:-archlinux:latest}"
+base="${OPENJAWZ_SMOKE_IMAGE:-archlinux:latest}"
+image="oj-smoke-base"
+here="$(cd "$(dirname "$0")" && pwd)"
 docker rm -f "$name" >/dev/null 2>&1 || true
 mkdir -p "$HOME/pkgcache"
 cat > "$work/oj-smoke.service" <<'UNIT'
@@ -20,7 +22,9 @@ StandardError=append:/work/driver.log
 WantedBy=multi-user.target
 UNIT
 : > "$work/driver.log"; rm -f "$work/result"
-# SAFE INCANTATION — see README.md. Never --cgroupns=host, never bind the host /sys/fs/cgroup.
+# the image layer masks udev BEFORE systemd starts (Dockerfile) — a container udevd re-triggers HOST devices
+docker build -q -t "$image" --build-arg "BASE=$base" "$here" >/dev/null
+# SAFE INCANTATION — see README.md. Never --cgroupns=host, never bind the host /sys/fs/cgroup, udev masked.
 docker run -d --name "$name" \
   --privileged --cgroupns=private --cgroup-parent=oj-smoke.slice \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 \
@@ -28,4 +32,4 @@ docker run -d --name "$name" \
   -v "$work:/work" -v "$HOME/pkgcache:/var/cache/pacman/pkg" \
   -v "$work/oj-smoke.service:/etc/systemd/system/oj-smoke.service:ro" \
   -v "$work/oj-smoke.service:/etc/systemd/system/multi-user.target.wants/oj-smoke.service:ro" \
-  "$image" /usr/lib/systemd/systemd --system >/dev/null
+  "$image" >/dev/null

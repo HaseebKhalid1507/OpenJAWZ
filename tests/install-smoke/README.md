@@ -21,9 +21,7 @@ docker run -d --name oj-smoke \
   --privileged --cgroupns=private --cgroup-parent=oj-smoke.slice \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --stop-timeout 10 \
   -v $work:/work \
-  -v $work/oj-smoke.service:/etc/systemd/system/oj-smoke.service:ro \
-  -v $work/oj-smoke.service:/etc/systemd/system/multi-user.target.wants/oj-smoke.service:ro \
-  oj-smoke-base
+  oj-smoke-base            # oj-smoke.service (the driver) is baked + enabled in the image layer
 ```
 
 ### Host-side verification (do it on a box whose display nobody is using)

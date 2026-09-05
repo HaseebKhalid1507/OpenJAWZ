@@ -6,4 +6,6 @@ RUN systemctl mask systemd-udevd.service systemd-udevd-control.socket systemd-ud
       systemd-udev-trigger.service systemd-udev-settle.service systemd-udevd-varlink.socket systemd-modules-load.service \
       systemd-firstboot.service systemd-networkd.service systemd-resolved.service systemd-timesyncd.service \
  && rm -f /etc/systemd/system/*.wants/systemd-udev* 2>/dev/null; true
+COPY oj-smoke.service /etc/systemd/system/oj-smoke.service
+RUN systemctl enable oj-smoke.service
 ENTRYPOINT ["/usr/lib/systemd/systemd", "--system"]

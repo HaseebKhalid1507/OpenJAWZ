@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenJAWZ install-smoke driver
+After=basic.target dbus.service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /work/driver.sh
+StandardOutput=append:/work/driver.log
+StandardError=append:/work/driver.log
+[Install]
+WantedBy=multi-user.target

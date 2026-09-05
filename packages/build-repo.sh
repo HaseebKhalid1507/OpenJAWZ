@@ -4,7 +4,7 @@
 #   env: SYNAPS_TARBALL=… AXEL_TARBALL=… (local -bin builds; SHA256SUMS beside each tarball)
 #        OPENJAWZ_KEYS=dir  (public key material for openjawz-keyring; --throwaway generates it)
 #   --allow-missing: a member that fails to build is skipped (dev only; the repo is then unsatisfiable and says so)
-#   --throwaway: fresh key per run; every package gets pkgrel .tw<fpr8> so two runs never share a name with different bytes
+#   --throwaway: fresh key per run; every package gets pkgrel N.<decimal of fpr[0:6]> so two runs never share a name with different bytes
 #   the keyring package is NEVER signed with the key it contains (circular); --keyring-key signs it with an older key on rotation
 # Output: DIR/{*.pkg.tar.zst[.sig], openjawz.db, openjawz.db.tar.zst, openjawz.files, …} with real files (no symlinks)
 # so it can be uploaded to a GitHub Release as-is.
@@ -43,7 +43,7 @@ if [ "$throwaway" = 1 ]; then
   gpg --batch --export "$key" > "$OPENJAWZ_KEYS/openjawz.gpg"
   printf '%s:4:\n' "$key" > "$OPENJAWZ_KEYS/openjawz-trusted"
   : > "$OPENJAWZ_KEYS/openjawz-revoked"
-  relsuffix=".tw${key:0:8}"
+  relsuffix=".$((16#${key:0:6}))"   # makepkg allows pkgrel=N[.N] only; a decimal from the fingerprint keeps two throwaway runs distinct
   echo "$key" > "$out/THROWAWAY"
   echo "throwaway key: $key (pkgrel suffix $relsuffix)"
 fi

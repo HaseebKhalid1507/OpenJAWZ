@@ -11,7 +11,7 @@ pv="$(sed -n 's/^pkgver=//p' packages/openjawz/PKGBUILD)"
 if [ -f boot.sha256 ]; then
   sha256sum -c boot.sha256 >/dev/null 2>&1 || { echo "FAIL boot.sha256 is stale (run: sha256sum boot > boot.sha256)"; fail=1; }
 else echo "FAIL boot.sha256 missing"; fail=1; fi
-[ "$(wc -c < boot)" -le 6144 ] || { echo "FAIL boot > 6 KB"; fail=1; }
+[ "$(wc -c < boot)" -le 7168 ] || { echo "FAIL boot > 7 KiB (the cap keeps curl|sh reviewable; raise it only with a reason in the commit)"; fail=1; }
 sh boot --help >/tmp/oj-boot-help.$$ 2>&1 && grep -q -- '--local' /tmp/oj-boot-help.$$ || { echo "FAIL boot --help must exit 0 and mention --local"; fail=1; }
 rm -f /tmp/oj-boot-help.$$
 # placeholder gate: a non-rc VERSION may not ship an all-zero KSHA

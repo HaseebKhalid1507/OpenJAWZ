@@ -127,7 +127,18 @@ bridge::_secret_re() {
 bridge::secret_shaped() {
   [ "${OPENJAWZ_HOOK_REDACT:-1}" = 0 ] && return 1
   [ -n "$_bridge_secret_re" ] || _bridge_secret_re=$(bridge::_secret_re)
-  printf '%s' "$1" | grep -qiE -- "$_bridge_secret_re" 2>/dev/null
+  local rc
+  printf '%s' "$1" | grep -qiE -- "$_bridge_secret_re" 2>/dev/null; rc=$?
+  case $rc in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) # the filter itself is broken (malformed pattern in redact.list / secret-patterns): FAIL CLOSED
+       if [ "${_bridge_filter_warned:-0}" = 0 ]; then
+         oj::log error "$BRIDGE_NAME: content filter unusable (grep rc=$rc — malformed pattern in redact.list or secret-patterns.txt); redacting EVERYTHING until fixed"
+         _bridge_filter_warned=1
+       fi
+       return 0 ;;
+  esac
 }
 bridge::placeholder() { printf '[redacted: secret-shaped] (%s from %s)' "${1:-event}" "${BRIDGE_NAME:-hook}"; }
 # bridge::redact TEXT [CT] → stdout: TEXT, or the placeholder when it is secret-shaped

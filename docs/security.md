@@ -2,7 +2,7 @@
 
 | surface | v0.1 behaviour | enforced by |
 |---|---|---|
-| bootstrap | two files (`boot` + `boot.sha256`), verified with `sha256sum -c` before `sh boot`; refuses to run as root; `sudo`/`doas` only for `pacman` and the repo line; prompts go through `/dev/tty` or `OPENJAWZ_YES=1` | `boot`, `tests/pkg` (sha256 current, ≤ 4 KB) |
+| bootstrap | two files (`boot` + `boot.sha256`), verified with `sha256sum -c` before `sh boot`; refuses to run as root; `sudo`/`doas` only for `pacman` and the repo line; prompts go through `/dev/tty` or `OPENJAWZ_YES=1` | `boot`, `tests/pkg` (sha256 current, ≤ 7 KiB — small enough to read before you run it) |
 | packages | `[openjawz]` repo with `SigLevel = Required DatabaseOptional` (package signatures required; database signing is v0.1.1); the only unsigned mode is `--local DIR` and `doctor` flags it yellow | `openjawz-keyring`, `openjawz doctor` |
 | daemon socket | Unix socket under `~/.synaps-cli/run/`, one per user, in your home (not `/tmp`); no TCP in v0.1 (deck = SSH-forwarded socket) | runtime; `docs/spectrum.md` |
 | secrets | none in this tree (patterns in `tests/grep-guard/secrets.txt`, path globs in `paths.txt`); `~/.synaps-cli/config` is scanned by `doctor` — only `provider.*` keys are expected | `tests/grep-guard` on every push |

@@ -17,16 +17,31 @@ sha256sum -c boot.sha256 && sh boot
 Two files, one checksum, then run it. (A short domain will front this once it is live; the raw URL is the source of truth.)
 
 **Not live yet.** v0.1.0 has no published repo, no release keyring, and no signed packages: the keyring
-checksum in `boot` is a placeholder and the public path stops there on purpose. Today the only path that
-installs is **local mode** — build the repo yourself, then point `boot` at it:
+checksum in `boot` is a placeholder and the public path stops there on purpose (it fails closed in about a
+second and writes nothing under `/etc`). Today the only path that installs is local mode.
+
+### Local mode
+
+Prerequisites: an Arch-based system (or `archlinux:latest` in a container), `git`, `base-devel`, `gnupg`,
+and a **Synaps runtime tarball** — there is no Synaps release with daemon mode yet, so build one from the
+`integration` branch of [SynapsCLI](https://github.com/HaseebKhalid1507/SynapsCLI) (`cargo build --release`,
+then `tar czf synaps.tar.gz -C target/release synaps`) and pass it in. Without it the build fails on purpose.
 
 ```sh
-packages/build-repo.sh --throwaway      # PKGBUILDs → build/repo (throwaway key; SYNAPS_TARBALL= for the runtime)
-sh boot --local build/repo              # unsigned, prints a red UNSIGNED LOCAL REPO banner
+git clone https://github.com/HaseebKhalid1507/OpenJAWZ && cd OpenJAWZ
+SYNAPS_TARBALL=/path/to/synaps.tar.gz packages/build-repo.sh --throwaway   # PKGBUILDs → build/repo, throwaway signing key
+OPENJAWZ_YES=1 sh boot --local build/repo                                   # non-interactive; prints a red UNSIGNED LOCAL REPO banner
+openjawz doctor                                                             # green rows, some yellow (brain absent until axel ships)
+synaps --attach --new                                                       # you are attached
 ```
 
-That is what `tests/install-smoke` runs in `archlinux:latest`. The public path turns on when the maintainer
-prerequisites in `docs/status.md` (P-R1 runtime tag, P-R2 axel tarball, P-R3 signing key) land.
+`--local` stages a world-readable copy of the repo under `/tmp` for the run (pacman ≥ 7 downloads as its
+own user and cannot read your home directory) and uses a **transient** pacman config — `/etc/pacman.conf`
+is never modified. `openjawz update --local build/repo` upgrades from the same directory later.
+
+That is exactly what `tests/install-smoke` runs in `archlinux:latest` (21 s on a warm mirror). The public
+path turns on when the maintainer prerequisites in `docs/status.md` land: a Synaps prerelease tag, an axel
+release tarball, and the signing key.
 
 Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs packages, not a distro. Never touches your bootloader or display manager. `sudo` is called where needed; the script itself refuses to run as root.
 

@@ -10,7 +10,13 @@ jobs:
         with: { fetch-depth: 0 }
       - name: deps
         run: sudo apt-get install -y -q shellcheck jq >/dev/null
+      - name: guard key present (the private-word check must never silently skip in CI)
+        env: { OPENJAWZ_GUARD_KEY: ${{ secrets.OPENJAWZ_GUARD_KEY }} }
+        run: |
+          if [ -z "$OPENJAWZ_GUARD_KEY" ]; then
+            echo "::error::OPENJAWZ_GUARD_KEY secret is not set — the grep-guard private-word check would be SKIPPED. Set it in repo settings (Settings → Secrets → Actions)."; exit 1; fi
       - name: fast tests (every tests/*/run.sh marked '# ci: fast')
+        env: { OPENJAWZ_GUARD_KEY: ${{ secrets.OPENJAWZ_GUARD_KEY }} }
         run: |
           rc=0
           for t in tests/*/run.sh; do

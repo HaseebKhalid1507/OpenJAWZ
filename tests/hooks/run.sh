@@ -82,3 +82,4 @@ fi
 
 echo "hooks: PASS (event delivered, ambient $lc)"
 exit 0
+

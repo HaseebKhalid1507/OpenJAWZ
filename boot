@@ -2,12 +2,12 @@
 # OpenJAWZ bootstrap.  curl -fsSLo boot https://raw.githubusercontent.com/HaseebKhalid1507/OpenJAWZ/main/boot
 #   sha256sum -c boot.sha256 && sh boot
 # env: OPENJAWZ_VERSION=0.1.0 OPENJAWZ_TRACK=stable|edge OPENJAWZ_YES=1 OPENJAWZ_DRY_RUN=1 OPENJAWZ_PROFILE=P
-#      OPENJAWZ_REPO=file:///dir   (or --local DIR: unsigned local repo, test mode; writes nothing under /etc)
+#      OPENJAWZ_REPO=file:///dir  (or --local DIR: unsigned local repo; never writes /etc)
 set -eu
 usage() {
   sed -n '2,5p' "$0"
   cat <<'EOF'
-flags: --local DIR   built local repo (packages/build-repo.sh --no-sign --out DIR); unsigned, transient, no /etc
+flags: --local DIR   built local repo (packages/build-repo.sh --out DIR); unsigned, transient
        --dry-run     print what would run (and the pinned keyring sha)
        --yes | -y    no prompts (non-tty needs it)   --profile P   desktop|laptop|deck|vm
        --version V   pin openjawz-meta=V             --help | -h
@@ -18,7 +18,10 @@ main() {
   ver="${OPENJAWZ_VERSION:-latest}"; track="${OPENJAWZ_TRACK:-stable}"; dry="${OPENJAWZ_DRY_RUN:-0}"
   yes="${OPENJAWZ_YES:-0}"; repo="${OPENJAWZ_REPO:-}"; prof="${OPENJAWZ_PROFILE:-}"
   while [ $# -gt 0 ]; do case "$1" in
-    --local) [ -d "${2:-}" ] || die "--local needs a directory"; repo="file://$(cd "$2" && pwd)"; shift;;
+    --local) [ -d "${2:-}" ] || die "--local needs a directory"
+             # pacman>=7 fetches as user alpm: stage a world-readable copy
+             stage=$(mktemp -d /tmp/openjawz-repo.XXXXXX); chmod 755 "$stage"; cp -r "$2"/. "$stage"/; chmod -R a+rX "$stage"
+             repo="file://$stage"; LOCAL_STAGE=$stage; shift;;
     --dry-run) dry=1;; --yes|-y) yes=1;;
     --profile) prof="${2:?--profile needs P}"; shift;; --version) ver="${2:?--version needs V}"; shift;;
     -h|--help) usage; exit 0;;
@@ -46,10 +49,10 @@ main() {
     exec </dev/tty
   fi
   tmp=$(mktemp -d); added=0
-  # what we wrote to /etc comes back out on failure
+  # undo /etc writes on failure
   cleanup() { rc=$?; if [ "$rc" -ne 0 ] && [ "$added" = 1 ]; then
       $SUDO sed -i '/^Include = \/etc\/pacman.d\/openjawz.conf$/d' /etc/pacman.conf; $SUDO rm -f /etc/pacman.d/openjawz.conf
-      echo "boot: failed (rc=$rc); repo line removed" >&2; fi; rm -rf "$tmp"; }
+      echo "boot: failed (rc=$rc); repo line removed" >&2; fi; rm -rf "$tmp" "${LOCAL_STAGE:-}"; }
   trap cleanup EXIT
   pkg=openjawz-meta; [ "$ver" = latest ] || pkg="openjawz-meta=$ver"
   ask() { [ "$yes" = 1 ] && return; printf 'Install %s from %s (also upgrades your system)? [y/N] ' "$1" "$2"; read -r a; case "$a" in y|Y) ;; *) die aborted;; esac; }

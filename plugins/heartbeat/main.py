@@ -90,17 +90,19 @@ def log(msg):
 
 # ── the beat ────────────────────────────────────────────────────────────────
 def fire_beat(session_id):
-    # Prefer targeting our session; fall back to broadcast if we never
-    # captured an id (boot race on on_session_start). Broadcast is proven
-    # to reach the active session.
-    target = (["--session", session_id] if session_id else ["--broadcast"])
+    # Under a shared daemon a beat must be addressed: broadcasting would wake every
+    # session (and every parked one). No captured id → no beat, say so once.
+    if not session_id:
+        log("beat skipped: no session id captured yet (on_session_start not seen)")
+        return
+    target = ["--session", session_id]
     try:
         subprocess.run(
             [SYNAPS_BIN, "send", BEAT_MSG, "--source", "heartbeat",
              "--severity", "low", *target],
             capture_output=True, timeout=15,
         )
-        log(f"beat → {'session ' + session_id[:8] if session_id else 'broadcast'}")
+        log(f"beat → session {session_id[:8]}")
     except Exception as e:  # never let a beat failure kill the loop
         log(f"beat failed: {e}")
 
@@ -114,7 +116,7 @@ def heartbeat_loop():
             now = time.monotonic()
             idle = now - STATE["last_activity"]
             since_beat = now - STATE["last_beat"]
-            # NOTE: no `session_id is not None` guard — fire_beat broadcasts
+            # fire_beat skips (and logs) when no session id has been captured
             # if we never caught the id, so a boot race can't make us blind.
             due = (
                 idle >= CFG["idle_threshold_sec"]
@@ -125,7 +127,7 @@ def heartbeat_loop():
                 STATE["last_beat"] = now
                 STATE["beats"] += 1
                 STATE["awaiting_self"] += 1
-                target = STATE["session_id"]  # may be None → broadcast
+                target = STATE["session_id"]  # may be None → beat skipped
                 fire = True
             else:
                 fire = False

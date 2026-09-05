@@ -23,7 +23,8 @@ if [ -n "${OPENJAWZ_GUARD_KEY:-}" ]; then
   mh="$(while read -r t; do h="$(printf '%s' "$t" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$OPENJAWZ_GUARD_KEY" | awk '{print $NF}')"; grep -qx "$h" "$here/forbidden.hmac" && echo "$t"; done <<< "$msgs" | grep -v '^$' || true)"
   [ -n "$mh" ] && { echo "FAIL forbidden token(s) in commit messages:"; echo "$mh"; fail=1; }
 else
-  echo "warn: OPENJAWZ_GUARD_KEY unset — private-word check skipped (shape patterns still enforced)" >&2
+  if [ -n "${CI:-}" ]; then echo "FAIL OPENJAWZ_GUARD_KEY unset in CI — the private-word check must not skip here"; fail=1
+  else echo "warn: OPENJAWZ_GUARD_KEY unset — private-word check skipped (shape patterns still enforced); maintainers: export it from your key file" >&2; fi
 fi
 # 1b. generic private-shaped patterns (paths, RFC1918, internal hostnames, emails) — reveal nothing themselves
 hits="$(grep -EIn -f "$here/patterns.txt" -- "${tracked[@]}" 2>/dev/null | grep -v "^$here/" | grep -viE "$allow")"

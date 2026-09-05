@@ -63,8 +63,8 @@ fi
 ask() { # ask "k/7 question" "placeholder" "default"
   local h=$1 ph=$2 def=$3 v=''
   case $UI in
-    gum)      v=$(gum input --header "$h" --placeholder "$ph" --value "$def" --width 80 < "$TTY" || true);;
-    whiptail) v=$(whiptail --title "OpenJAWZ" --inputbox "$h" 10 78 "$def" 3>&1 1>&2 2>&3 < "$TTY" || true);;
+    gum)      v=$(gum input --header "$h" --placeholder "$ph" --value "$def" --width 80 < "$TTY" 2>"$TTY" || true);;
+    whiptail) v=$(whiptail --title "OpenJAWZ" --inputbox "$h" 10 78 "$def" 3>&1 1>"$TTY" 2>&3 < "$TTY" || true);;
     read)     printf '\n%s\n  [%s]\n> ' "$h" "$def" > "$TTY"; IFS= read -r v < "$TTY" || true;;
   esac
   printf '%s' "${v:-$def}"
@@ -72,9 +72,9 @@ ask() { # ask "k/7 question" "placeholder" "default"
 choose() { # choose "k/7 question" "default" opt...
   local h=$1 def=$2; shift 2; local v=''
   case $UI in
-    gum)      v=$(gum choose --header "$h" --selected "$def" "$@" < "$TTY" || true);;
+    gum)      v=$(gum choose --header "$h" --selected "$def" "$@" < "$TTY" 2>"$TTY" || true);;
     whiptail) local items=(); local o; for o in "$@"; do items+=("$o" ""); done
-              v=$(whiptail --title "OpenJAWZ" --menu "$h" 16 78 6 "${items[@]}" --default-item "$def" 3>&1 1>&2 2>&3 < "$TTY" || true);;
+              v=$(whiptail --title "OpenJAWZ" --menu "$h" 16 78 6 "${items[@]}" --default-item "$def" 3>&1 1>"$TTY" 2>&3 < "$TTY" || true);;
     read)     printf '\n%s  (%s)\n  [%s]\n> ' "$h" "$*" "$def" > "$TTY"; IFS= read -r v < "$TTY" || true;;
   esac
   printf '%s' "${v:-$def}"
@@ -111,7 +111,7 @@ case $PROFILE in desktop|laptop|deck|vm) ;; *) oj::die "profile must be desktop|
 
 # ── confirm ──────────────────────────────────────────────────────────────────
 if [ "$UI" = gum ] && [ $RENDER_ONLY = 0 ]; then
-  gum confirm "Write identity for $USER_NAME / $AGENT_NAME ($PROFILE, memory: $MEMORY_MODE)?" < "$TTY" || exit 130
+  gum confirm "Write identity for $USER_NAME / $AGENT_NAME ($PROFILE, memory: $MEMORY_MODE)?" < "$TTY" 2>"$TTY" || exit 130
 fi
 
 # ── write identity.env (0600) ────────────────────────────────────────────────

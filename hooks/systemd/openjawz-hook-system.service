@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenJAWZ hook: system events (network, sleep/resume) via the system bus
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ/blob/main/docs/hooks.md
+PartOf=openjawz-hooks.target
+After=openjawz-ambient.service
+# idle: dbus-monitor 2.6 MB + bash 4 MB; no Wayland needed (laptop lid/suspend works headless)
+
+[Service]
+ExecStart=/usr/lib/openjawz/hooks/system-events
+Restart=on-failure
+RestartSec=2
+Slice=background.slice
+
+[Install]
+WantedBy=default.target openjawz-hooks.target

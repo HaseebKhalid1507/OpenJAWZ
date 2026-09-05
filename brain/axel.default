@@ -1,0 +1,18 @@
+# ~/.synaps-cli/axel.toml — the brain extension's settings. Installed by `openjawz brain init` if absent.
+# No secrets here. Paths use the agent's brain; see memory-policy.md for what each knob protects.
+
+brain_path = "{{XDG_CONFIG_HOME}}/axel/{{AGENT_NAME}}.r8"
+
+# Ambient injection (before_message): token budget, top-k, and the relevance floor from the memory policy.
+injection_budget = 700
+injection_top_k = 5
+injection_min_score = 0.30        # nothing below this is injected — the policy's floor
+
+# Extraction at session end: source-grounded, staged, never secrets.
+auto_extract = true
+extract_categories = ["events", "preferences", "entities", "cases", "patterns"]
+default_sensitivity = "private"   # public | private | work ; "secret" is never stored
+secret_patterns = "/usr/share/openjawz/brain/secret-patterns.txt"
+
+# Optional reranker model download (~90 MB). Off by default: the 2 MB story.
+reranker = false

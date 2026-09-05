@@ -1,0 +1,21 @@
+# $XDG_CONFIG_HOME/axel/sources.toml — what the brain indexes. Written by `openjawz brain init`; edit freely.
+# priority: high = never auto-pruned (flagged for review) · medium · low = decays and auto-prunes.
+# sensitivity: public | private | work   (default private; see /usr/share/openjawz/brain/memory-policy.md)
+
+[[source]]
+name = "notes"
+path = "{{OPENJAWZ_HOME}}/notes/"
+priority = "high"
+sensitivity = "private"
+
+[[source]]
+name = "context"
+path = "{{OPENJAWZ_HOME}}/context/"
+priority = "high"
+sensitivity = "private"
+
+[[source]]
+name = "skills"
+path = "~/.synaps-cli/skills/"
+priority = "high"
+sensitivity = "public"

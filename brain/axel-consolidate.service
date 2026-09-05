@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenJAWZ brain consolidation pass (reindex → strengthen → reorganize → prune → secret scrub)
+ConditionPathExists=%E/openjawz/identity.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%E/openjawz/identity.env
+ExecStart=/usr/lib/openjawz/bin/openjawz-brain consolidate
+Nice=10
+IOSchedulingClass=idle

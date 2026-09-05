@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# openjawz-help: list verbs from the `# openjawz-<verb>:` headers in bin/ and tools/
+# usage: openjawz help [--json] [<verb>]
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+OPENJAWZ_LIB="${OPENJAWZ_LIB:-/usr/lib/openjawz}"
+json=0; want=""
+for a in "$@"; do case "$a" in --json) json=1 ;; -h|--help) ;; *) want="$a" ;; esac; done
+
+rows=()
+for d in "$OPENJAWZ_LIB/bin" "$OPENJAWZ_LIB/tools"; do
+  [ -d "$d" ] || continue
+  for f in "$d"/openjawz-*; do
+    [ -x "$f" ] || continue
+    v="${f##*/openjawz-}"
+    s="$(sed -n '2,6{s/^# openjawz-[a-z0-9-]*: *//p}' "$f" | head -1)"
+    rows+=("$v	${s:-(no header)}")
+  done
+done
+
+if [ "$json" = 1 ]; then
+  printf '%s\n' "${rows[@]}" | jq -Rn '[inputs | split("\t") | {verb: .[0], summary: .[1]}]'
+  exit 0
+fi
+if [ -n "$want" ] && [ "$want" != help ]; then
+  hit=0
+  for r in "${rows[@]}"; do [ "${r%%	*}" = "$want" ] && { printf '%s\n' "$r"; hit=1; }; done
+  [ "$hit" = 1 ] && exit 0
+  printf 'openjawz: unknown verb %q\n' "$want" >&2
+  exit 127
+fi
+echo "openjawz $(cat /usr/share/openjawz/VERSION 2>/dev/null || echo dev) — verbs:"
+printf '%s\n' "${rows[@]}" | sort | column -t -s '	' | sed 's/^/  /'

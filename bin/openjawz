@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# openjawz: the router — `openjawz <verb> [args]` → openjawz-<verb>
+# usage: openjawz <verb> [args…]   (openjawz help lists verbs)
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+OPENJAWZ_LIB="${OPENJAWZ_LIB:-/usr/lib/openjawz}"
+verb="${1:-help}"; [ $# -gt 0 ] && shift
+case "$verb" in
+  -h|--help) verb=help ;;
+  -V|--version) verb=version ;;
+esac
+for d in "$OPENJAWZ_LIB/bin" "$OPENJAWZ_LIB/tools"; do
+  [ -x "$d/openjawz-$verb" ] && exec "$d/openjawz-$verb" "$@"
+done
+exec "$OPENJAWZ_LIB/bin/openjawz-help" "$verb"

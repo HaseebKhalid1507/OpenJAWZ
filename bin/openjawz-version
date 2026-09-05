@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# openjawz-version: print OpenJAWZ, synaps and axel versions
+# usage: openjawz version
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
+oj::paths
+echo "openjawz $(oj::version)"
+oj::have synaps && echo "synaps  $(synaps --version 2>/dev/null | awk '{print $NF}')" || echo "synaps  (not installed)"
+oj::have axel && echo "axel    $(axel --version 2>/dev/null | awk '{print $NF}')" || echo "axel    (not installed)"

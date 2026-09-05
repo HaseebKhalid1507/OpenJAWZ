@@ -17,7 +17,7 @@ rm -rf /tmp/src; cp -a /work/src /tmp/src && chown -R tester /tmp/src
 step build
 st=$(ls /work/dist/synaps-*.tar.gz 2>/dev/null | head -1); ax=$(ls /work/dist/axel-*.tar.gz 2>/dev/null | head -1)
 runuser -u tester -- env HOME=/home/tester ${st:+SYNAPS_TARBALL=$st} ${ax:+AXEL_TARBALL=$ax} \
-  /tmp/src/packages/build-repo.sh --no-sign --out /repo --src /tmp/src 2>&1 | tail -12
+  /tmp/src/packages/build-repo.sh --no-sign --out /repo --src /tmp/src 2>&1 | grep -E "^(==|!!|--|repo:|throwaway)" 
 ls /repo/*.pkg.tar.zst >/dev/null 2>&1 || finish "build-failed"
 step "boot --local ($P)  [clock starts]"
 T0=$(date +%s); echo "$T0" > /work/t0

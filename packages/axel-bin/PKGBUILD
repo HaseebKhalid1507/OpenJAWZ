@@ -3,7 +3,7 @@
 # axel — the memory engine (the brain). Written against the release layout we need:
 #   axel-v<ver>-x86_64-unknown-linux-gnu.tar.gz + SHA256SUMS on the GitHub release.
 # Until that release exists this is an optdepends of openjawz-meta and `openjawz doctor` reports the brain absent.
-# Dev override:  AXEL_TARBALL=/path/axel-v<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf  (SHA256SUMS beside it, or AXEL_SHA256=)
+# Dev override:  AXEL_TARBALL=/path/axel-v<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf  (tarball copied into this dir; SHA256SUMS beside the original, or AXEL_SHA256=)
 
 pkgname=axel-bin
 pkgver=0.1.0
@@ -19,7 +19,8 @@ _tag="v$pkgver"
 _asset="axel-$_tag-x86_64-unknown-linux-gnu.tar.gz"
 
 if [[ -n ${AXEL_TARBALL:-} ]]; then
-  source=("$_asset::file://$AXEL_TARBALL")
+  # local mode: the tarball is copied next to this PKGBUILD (build-repo.sh does it) and used as a local source
+  source=("$(basename "$AXEL_TARBALL")")
   if [[ -n ${AXEL_SHA256:-} ]]; then sha256sums=("$AXEL_SHA256")
   else sha256sums=("$(grep -F "$(basename "$AXEL_TARBALL")" "$(dirname "$AXEL_TARBALL")/SHA256SUMS" | awk '{print $1}')"); fi
 else

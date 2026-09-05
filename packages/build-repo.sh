@@ -50,9 +50,9 @@ build() { # dir env…
   ( cd "$src/packages/$d" && env "$@" "${mk[@]}" ) || { echo "!! $d failed" >&2; return 1; }
 }
 build openjawz OPENJAWZ_SRC="$src"
-if [ -n "${SYNAPS_TARBALL:-}" ]; then build synaps-bin SYNAPS_TARBALL="$SYNAPS_TARBALL" ${SYNAPS_SHA256:+SYNAPS_SHA256="$SYNAPS_SHA256"}
+if [ -n "${SYNAPS_TARBALL:-}" ]; then cp -f "$SYNAPS_TARBALL" "$src/packages/synaps-bin/"; build synaps-bin SYNAPS_TARBALL="$SYNAPS_TARBALL" ${SYNAPS_SHA256:+SYNAPS_SHA256="$SYNAPS_SHA256"}
 else echo "-- synaps-bin: no SYNAPS_TARBALL, trying the release URL"; build synaps-bin A=1 || echo "!! synaps-bin skipped"; fi
-if [ -n "${AXEL_TARBALL:-}" ]; then build axel-bin AXEL_TARBALL="$AXEL_TARBALL" ${AXEL_SHA256:+AXEL_SHA256="$AXEL_SHA256"}
+if [ -n "${AXEL_TARBALL:-}" ]; then cp -f "$AXEL_TARBALL" "$src/packages/axel-bin/"; build axel-bin AXEL_TARBALL="$AXEL_TARBALL" ${AXEL_SHA256:+AXEL_SHA256="$AXEL_SHA256"}
 else echo "-- axel-bin: no AXEL_TARBALL, skipped (D7)"; fi
 if [ -s "${OPENJAWZ_KEYS:-$src/packages/openjawz-keyring/keys}/openjawz.gpg" ]; then
   build openjawz-keyring ${OPENJAWZ_KEYS:+OPENJAWZ_KEYS="$OPENJAWZ_KEYS"}

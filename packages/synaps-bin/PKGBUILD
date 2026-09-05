@@ -1,7 +1,7 @@
 # Maintainer: OpenJAWZ maintainers <https://github.com/HaseebKhalid1507/OpenJAWZ/issues>
 #
 # Pinned to the Synaps prerelease that carries daemon mode. Attached rc form (vercmp-safe).
-# Dev override:  SYNAPS_TARBALL=/path/synaps-<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf
+# Dev override:  SYNAPS_TARBALL=/path/synaps-<ver>-x86_64-unknown-linux-gnu.tar.gz makepkg -sf   (copy the tarball into this dir first)
 #   (the tarball must sit next to a SHA256SUMS file, or set SYNAPS_SHA256=<hex>)
 
 pkgname=synaps-bin
@@ -18,7 +18,8 @@ _tag="v$pkgver"
 _asset="synaps-$_tag-x86_64-unknown-linux-gnu.tar.gz"
 
 if [[ -n ${SYNAPS_TARBALL:-} ]]; then
-  source=("$_asset::file://$SYNAPS_TARBALL")
+  # local mode: the tarball is copied next to this PKGBUILD (build-repo.sh does it) and used as a local source
+  source=("$(basename "$SYNAPS_TARBALL")")
   if [[ -n ${SYNAPS_SHA256:-} ]]; then sha256sums=("$SYNAPS_SHA256")
   else sha256sums=("$(grep -F "$(basename "$SYNAPS_TARBALL")" "$(dirname "$SYNAPS_TARBALL")/SHA256SUMS" | awk '{print $1}')"); fi
 else

@@ -31,5 +31,27 @@ bin/openjawz-shutdown >/dev/null 2>&1; rc=$?; [ "$rc" = 0 ] || { echo "FAIL shut
 grep -q "completed" "$OPENJAWZ_HOME/context/active/checkpoint.md" || { echo "FAIL shutdown did not clear checkpoint"; fail=1; }
 bin/openjawz-boot --quiet --no-world 2>&1 | grep "round trip" >/dev/null || { echo "FAIL boot does not show the session"; fail=1; }
 bin/openjawz-crew install >/dev/null 2>&1 && [ "$(ls "$tmp/.synaps-cli/agents" | wc -l)" = 14 ] || { echo "FAIL crew install != 14 roles"; fail=1; }
+
+# shutdown ordering (shutdown-commits-then-refuses): a missing sacred file → rc 1, NOTHING written, re-runnable;
+# --auto twice → exactly one UNCLEAN line
+sd=$(mktemp -d)
+( export OPENJAWZ_HOME="$sd/oj" OPENJAWZ_DATA="$sd/oj/data" OPENJAWZ_STATE="$sd/state" XDG_CONFIG_HOME="$sd/.config"
+  OPENJAWZ_TEMPLATES="$PWD/ops/templates" OPENJAWZ_PREAMBLE="$PWD/ops/subagent-preamble.md" bin/openjawz-onboard --yes --render-only >/dev/null 2>&1
+  A="$OPENJAWZ_HOME/context/active"
+  printf '# Session Brief\n## Summary\nordering\n' > "$A/session-brief.md"; printf '# Handoff\nnext\n' > "$A/handoff.md"
+  mkdir -p "$OPENJAWZ_HOME/notes/journal"; echo "# j" > "$OPENJAWZ_HOME/notes/journal/$(date -I).md"
+  rm -f "$OPENJAWZ_HOME/SOUL.md"                                   # the sacred file that step 7 must catch FIRST
+  before=$(cat "$A/sessions_recent.md" "$A/checkpoint.md" | md5sum)
+  bin/openjawz-shutdown >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] || echo "FAIL shutdown with a missing sacred file exited $rc, want 1"
+  [ "$(cat "$A/sessions_recent.md" "$A/checkpoint.md" | md5sum)" = "$before" ] || echo "FAIL shutdown wrote sessions/checkpoint before step 7 failed"
+  [ -e "$OPENJAWZ_STATE/last-shutdown" ] && echo "FAIL shutdown stamped a failed run"
+  bin/openjawz-shutdown --auto >/dev/null 2>&1; bin/openjawz-shutdown --auto >/dev/null 2>&1
+  [ "$(grep -c 'UNCLEAN' "$A/checkpoint.md")" = 1 ] || echo "FAIL --auto twice wrote $(grep -c UNCLEAN "$A/checkpoint.md") UNCLEAN lines, want 1"
+  echo "# soul" > "$OPENJAWZ_HOME/SOUL.md"
+  bin/openjawz-shutdown >/dev/null 2>&1 || echo "FAIL shutdown re-run after fixing the sacred file exited $?"
+  [ -e "$OPENJAWZ_STATE/last-shutdown" ] || echo "FAIL shutdown did not stamp the clean run"
+) > "$sd/out" 2>&1; [ -s "$sd/out" ] && { cat "$sd/out"; fail=1; }; rm -rf "$sd"
+
 v "tools: $n executables, round trip ok, fail=$fail"
 exit "$fail"

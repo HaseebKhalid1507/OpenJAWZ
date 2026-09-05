@@ -4,10 +4,11 @@ The loop is: boot → work (checkpoint every ~10 exchanges) → shutdown. Everyt
 
 ## The session
 ```bash
-synaps                          # attach (thin client to the daemon)
+synaps --attach                 # the TUI attached to the daemon (--new: fresh session). Bare `synaps` runs the engine in-process — not what you want here
+synaps attach --create          # the line client, same daemon, for scripts and non-TTY shells
 openjawz boot                   # the agent runs this; you can too — Identity → Work → World
 openjawz checkpoint "…"         # every ~10 exchanges; --append for concurrent sessions; --clear
-openjawz shutdown               # the 7-step checklist, verified; refuses if the brief/handoff/journal are missing
+openjawz shutdown               # the 7-step checklist, verified first, written last; refuses if the brief/handoff/journal are missing
 openjawz shutdown --no-handoff  # nothing in flight
 ```
 What the agent writes and where:
@@ -51,10 +52,16 @@ openjawz comms channels | read <channel> | unread
 ```bash
 openjawz brain status           # size, documents, memories, last consolidation
 openjawz brain backup           # tarball → ~/.local/state/openjawz/brain-backups/ (keeps 3); update does this for you
-openjawz brain consolidate      # what the 6 h timer runs
+openjawz brain consolidate      # what the 6 h timer runs; ends with `brain scan`
+openjawz brain scan             # secret-pattern scan of stored memories: hits are deleted and logged
 ```
-The agent searches before it answers ("search before you speak" is rule 9 in its SOUL). Ambient injection has a 0.30
-relevance floor; secrets are never stored — the same pattern list that guards this repo guards the brain.
+> **Yellow until the axel release (P-R2) exists.** If `axel` is not installed every line above prints "absent" and
+> exits 2 — nothing else depends on it. The local axel build in hand has no `consolidate`/`extract` and ignores
+> `axel.toml`, so `consolidate` degrades to a reindex and the 0.30 injection floor is not enforced yet. What *is*
+> enforced today: `brain scan` — the same pattern list that guards this repo (`brain/secret-patterns.txt`) runs
+> against stored memories, matching rows are deleted and logged to `~/.local/state/openjawz/brain-scrub.log`.
+
+The agent searches before it answers ("search before you speak" is rule 9 in its SOUL).
 
 ## Tool stats
 ```bash

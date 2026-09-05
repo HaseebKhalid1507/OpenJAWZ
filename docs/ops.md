@@ -9,7 +9,7 @@ the skills, and a small set of tools that are general enough to ship.
 | `openjawz onboard [--yes] [--force] [--render-only]` | the identity form → `identity.env` → renders SOUL/OP/AGENTS/system/preamble → `config` keys → `synaps daemon reload` |
 | `openjawz boot [--quiet] [--no-world]` | Identity → Work → World briefing; `boot.d/` sections run in parallel with an 8 s cap; brain not recalled (the extension injects) |
 | `openjawz checkpoint [--append] [--clear] [text]` | `context/active/checkpoint.md` with a timestamp — the ~10-exchange rule has a tool |
-| `openjawz shutdown [--auto] [--no-handoff] [--number N] [--dry-run]` | the **verifier**: refuses unless brief + handoff + journal exist this session; then sessions add, checkpoint clear, `ls`, brain extract/handoff, backup. `--auto` never refuses — marks UNCLEAN, exit 2 |
+| `openjawz shutdown [--auto] [--no-handoff] [--number N] [--dry-run]` | the **verifier**: checks brief + handoff + journal + the sacred files FIRST and refuses (nothing written, re-runnable) if any is missing; only then sessions add, checkpoint clear, brain extract/handoff, backup, stamp. `--auto` never refuses — marks UNCLEAN once, exit 2 |
 | `openjawz crew install\|refresh\|list` | roles → `~/.synaps-cli/agents/` |
 | `openjawz brain init\|status\|backup\|consolidate` | see `docs/brain.md` |
 

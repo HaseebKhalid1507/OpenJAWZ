@@ -1,10 +1,10 @@
 # daemon/
 
-`synaps-daemon.service` — a plain systemd **user** unit (`Type=simple`, `ExecStart` → `openjawz-daemon-exec` → `synaps daemon --foreground`). Plus `config.default` (flat `key = value`, seeded into `~/.synaps-cli/config`), `mcp.json.default` (the `axel` memory server, `shared: true` — one brain, one writer), `profiles/` (desktop / laptop / deck / vm env files) and `environment.d/10-openjawz.conf` (PATH for the tools).
+`synaps-daemon.service` — a plain systemd **user** unit (`Type=simple`, `ExecStart` → `openjawz-daemon-exec` → `synaps daemon --foreground`). Plus `config.default` (flat `key = value`, seeded into `~/.synaps-cli/config`), `mcp.json.default` (the `axel` MCP server, `shared: true`; `openjawz brain init` merges it into `~/.synaps-cli/mcp.json` — the extension in `plugins/axel` is the second axel process on the same `.r8`, see `docs/brain.md`), `profiles/` (desktop / laptop / deck / vm env files) and `environment.d/10-openjawz.conf` (PATH for the tools).
 
 ## Why not socket activation
 
-The runtime binds its own socket and does not read `LISTEN_FDS`; a `.socket` unit would race that bind. So there is **no `synaps-daemon.socket`** in v0.1. The daemon stays resident; *sessions* park to ~2 MB when nobody is watching. Socket activation + idle-exit land with the runtime PR listed in `docs/architecture.md`.
+The runtime binds its own socket and does not read `LISTEN_FDS`; a `.socket` unit would race that bind. So there is **no `synaps-daemon.socket`** in v0.1. The daemon stays resident; *sessions* park to ~2 MB when nobody is watching. `--idle-exit` already exists in the runtime (the vm profile uses it); socket activation is the runtime PR listed in `docs/architecture.md`, and only after it can desktop/laptop idle-exit without losing the ambient session.
 
 ## The unit, and why each line
 

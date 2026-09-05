@@ -16,11 +16,23 @@ sha256sum -c boot.sha256 && sh boot
 
 Two files, one checksum, then run it. (A short domain will front this once it is live; the raw URL is the source of truth.)
 
+**Not live yet.** v0.1.0 has no published repo, no release keyring, and no signed packages: the keyring
+checksum in `boot` is a placeholder and the public path stops there on purpose. Today the only path that
+installs is **local mode** — build the repo yourself, then point `boot` at it:
+
+```sh
+packages/build-repo.sh --throwaway      # PKGBUILDs → build/repo (throwaway key; SYNAPS_TARBALL= for the runtime)
+sh boot --local build/repo              # unsigned, prints a red UNSIGNED LOCAL REPO banner
+```
+
+That is what `tests/install-smoke` runs in `archlinux:latest`. The public path turns on when the maintainer
+prerequisites in `docs/status.md` (P-R1 runtime tag, P-R2 axel tarball, P-R3 signing key) land.
+
 Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs packages, not a distro. Never touches your bootloader or display manager. `sudo` is called where needed; the script itself refuses to run as root.
 
 When it's done you have:
 
-- **a daemon** — `synaps daemon` as a systemd *user* service (`synaps-daemon.service`, `Type=simple`). Sessions park to ~2 MB when nobody is watching; the daemon itself stays resident in v0.1. No socket activation yet — the unit is `Type=simple`; the daemon auto-spawns on first attach if it is not running. Socket activation + idle-exit land with the runtime PR (see `docs/architecture.md`, "What the runtime still owes us").
+- **a daemon** — `synaps daemon` as a systemd *user* service (`synaps-daemon.service`, `Type=simple`). Sessions park to ~2 MB when nobody is watching; the daemon itself stays resident on desktop/laptop (the vm profile idle-exits after 30 min). No socket activation yet — the runtime auto-spawns the daemon on first attach if it is not running; the `.socket` unit lands with a runtime PR (`docs/architecture.md`, "What the runtime still owes us").
 - **a brain** — persistent memory with provenance, one writer, every session reads it. Requires `axel`; `openjawz doctor` tells you if it is missing.
 - **a crew** — planner / implementer / reviewer / tester (14 roles) with a build discipline that measures before it designs.
 - **hooks** — your desktop, filesystem, notifications, and clock feed an always-on *ambient* session that costs ~2 MB while nothing is happening.
@@ -33,17 +45,17 @@ Every agent CLI you've used spawns a full engine, its own memory, and its own si
 | | per additional terminal |
 |---|---:|
 | engine-per-terminal | 40–260 MB |
-| OpenJAWZ (`synaps --attach --new`) | **~2 MB** |
+| OpenJAWZ (`synaps --attach`, one more TUI on the daemon) | **~2 MB** |
 
-Measured, reproducible — the scripts are in `tests/memprof/`; the numbers are the Synaps daemon-mode numbers (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
+The numbers are the Synaps daemon-mode numbers, measured there (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). The scripts to re-measure are in `tests/memprof/`; the gates are a bench-box run, not CI, and v0.1.0 has not re-run them in this tree. Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Two spellings, on purpose: `synaps --attach [--new]` is the TUI on the daemon (the hotkey, you); `synaps attach --create` is the line client (scripts, the smoke, the ambient session). Bare `synaps` is the in-process engine. Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
 
 ## The spectrum
 
 | where | what runs there |
 |---|---|
 | desktop | daemon + everything, desktop hooks, bar widget |
-| laptop | same, sessions park on lid-close |
-| cyberdeck | **client only** — daemon on your desktop; v0.1 reaches it over an SSH-forwarded socket (`openjawz deck attach <host>`, one command). Native `--tcp` + broker token is a runtime PR. |
+| laptop | same; suspend/resume reach the ambient session as events, sessions park on the same 60 s grace |
+| cyberdeck | **client only** — daemon on your desktop. v0.1.0 ships the profile (no local daemon, no hooks) and nothing else: you forward the daemon's socket over SSH yourself (`deck/README.md` has the two lines). No `openjawz deck` verb exists yet; native `--tcp` + broker token is a runtime PR. |
 | VM / server | the daemon *is* the machine's agent; a browser is a client |
 
 Same binary. Same brain. Two windows into one mind.
@@ -76,20 +88,20 @@ openjawz uninstall --purge      # also removes state and the brain (asks first; 
 
 ## Security
 
-Signed repo (`SigLevel = Required`), no secrets in this tree (`tests/grep-guard` enforces it on every push), scripts never run as root, the brain's secret-pattern refusal is documented in `brain/memory-policy.md`. The reviewer's table lives in `docs/security.md`.
+Signed repo (`SigLevel = Required` on the public path — not yet published; local mode is `Optional TrustAll` and says so), no secrets in this tree (`tests/grep-guard` enforces it on every push), scripts never run as root, the brain's secret-pattern refusal is documented in `brain/memory-policy.md`. The reviewer's table lives in `docs/security.md`.
 
 ## Status
 
-**v0.1.0 — passes install-smoke in `archlinux:latest`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). Full table, what is yellow, and what slipped: `docs/status.md`.
+**v0.1.0 — passes install-smoke in `archlinux:latest` via `boot --local`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). No public repo yet — see "The 10-minute promise". Full table, what is yellow, and what slipped: `docs/status.md`.
 
 What `openjawz doctor` shows yellow on a fresh box, honestly:
 
 - **brain absent** — until an `axel` release tarball exists, `axel-bin` cannot be built from a URL; the brain rows stay yellow and `openjawz brain init` skips.
 - **desktop / notify hooks** — condition-skipped until a Wayland session exports `WAYLAND_DISPLAY` to systemd (`doctor` prints the exec-once line).
 - **fs hook** — exits clean if none of `watch.list` exists yet (`~/Projects`, `~/Downloads`).
-- **repo unsigned** — only in `--local` test mode; the public repo is `SigLevel = Required`.
+- **repo unsigned** — always, in v0.1.0: local mode is the only mode. The public repo will be `SigLevel = Required`.
 
-Gauntlet: see `docs/gauntlet/summary.md` once a round has run.
+Gauntlet: round 1 ran and returned NO-SHIP; the fixes are on `main` and `docs/status.md` ("Gauntlet") summarises what changed. There is no `docs/gauntlet/` directory yet.
 
 ## License
 

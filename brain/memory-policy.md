@@ -41,8 +41,9 @@ Subagents receive `public` + the declared `work` scope only. The memory mode cho
 
 ## Never stored
 Anything matching `brain/secret-patterns.txt` — the **same list the repo's grep-guard uses** (`tests/grep-guard/secrets.txt`) —
-is dropped at extract time **and** at index time, and a scrub pass runs in consolidation phase 4.
-If a secret is found in an already-stored memory it is deleted, not redacted, and the deletion is logged.
+is the contract for extract time and index time (an axel PR — the local build does not refuse yet), and is **enforced
+today** by `openjawz brain scan`, which consolidation runs last: a memory matching any pattern is deleted, not redacted,
+and the deletion is logged (`$OPENJAWZ_STATE/brain-scrub.log`, one line per row).
 
 Ambient injection has a **relevance floor: 0.30**. Below it nothing is injected — a low-scoring hit is noise at best and
 a leak at worst.

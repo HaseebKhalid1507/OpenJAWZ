@@ -48,9 +48,9 @@ Policy — sensitivity levels, what is never stored: `/usr/share/openjawz/brain/
 ## Tasks
 Files: `{{OPENJAWZ_HOME}}/data/tasks.json` (active), `tasks_history.json` (done). Native tools via the `synaps-tasks` plugin; shell twin:
 ```bash
-openjawz tasks list | add "title" [--priority P] [--category C] [--deadline D]
-openjawz tasks done <id> | update <id> [--field val] | delete <id>
-openjawz tasks subtask <id> "title" | sub-done <id> <index>
+openjawz tasks list | add "title" [-p P] [-c C] [-d YYYY-MM-DD] [-s "subtask"]
+openjawz tasks done <id> | update <id> [-t title] [-s status] [-p priority] [-d deadline] [-c category] | delete <id>
+openjawz tasks sub <id> "title" | sub-done <id> <index>       # index is 1-based
 openjawz tasks due | search "q" | today | history
 ```
 Schema: `{ id, title, status (todo|in-progress|done|blocked), priority (high|medium|low|null), deadline, category, created, subtasks[] }`. Auto-increment `next_id`.
@@ -72,8 +72,9 @@ Schema: `{ id, title, status (todo|in-progress|done|blocked), priority (high|med
 ```
 
 ## Tools
-Generated: `openjawz tools-doc` → `context/active/tools_summary.md`. Do not hand-edit.
-Every tool: `--help` exits 0, honours `NO_COLOR`, tracked by `toolstats` (opt out: `OPENJAWZ_NO_TRACK=1`).
+`openjawz help` lists every verb (one line each, from the tool's own header). `context/full/tools.md` is yours to
+keep; `openjawz tools-doc` (the generator) is not shipped in v0.1.0. Every tool: `--help` exits 0, Python tools
+log to `openjawz toolstats` (opt out: `OPENJAWZ_NO_TRACK=1`).
 
 ## Safety
 **Blast-radius rule** — before any destructive operation (`rm`, `chmod`, `mv`, DB writes):
@@ -101,7 +102,8 @@ Roles: planner · implementer · reviewer · tester · debugger · researcher ·
 Playbooks: `/usr/share/openjawz/crew/playbooks/` — build-feature, code-review, debug, deep-research, quick-recon, security-audit, gauntlet.
 
 ## Maintenance
-`openjawz maintain` — first session of the week or on request: overdue/stale tasks, workspace triage, context drift, broken tools.
+First session of the week or on request, by hand until `openjawz maintain` ships (v0.1.1): `openjawz tasks due` for
+overdue/stale tasks, `openjawz sessions recent`, and a read of `context/active/` for drift.
 
 ## Machine
 Profile: `{{PROFILE}}` (`$XDG_CONFIG_HOME/openjawz/profile.env`). Host names and addresses live in the ssh config, never here.

@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# openjawz-onboard: first-run identity form → identity.env, SOUL/OP/AGENTS, system.md, config
+# usage: openjawz onboard [--yes] [--render-only] [--force]
+# owner: openjawz-ops
+# ci: fast
+#
+# Seven questions, under a minute, every one with a default so `--yes` produces a working identity.
+# No API keys are asked here — that is `synaps login`. Ends with `synaps daemon reload` because the
+# runtime caches `identity=` process-wide.
+set -euo pipefail
+export OJ_CMD=onboard
+# shellcheck source=../ops/lib/source-lib.sh
+. "$(dirname "$(readlink -f "$0")")/../ops/lib/source-lib.sh"
+
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; }
+RENDER_ONLY=0 FORCE=0
+for a in "$@"; do
+  case $a in
+    -h|--help) usage; exit 0;;
+    --yes) export OPENJAWZ_YES=1;;
+    --render-only) RENDER_ONLY=1;;
+    --force) FORCE=1;;
+    *) usage; exit 2;;
+  esac
+done
+
+TPL_DIR="${OPENJAWZ_TEMPLATES:-$OPENJAWZ_SHARE/ops/templates}"
+[ -d "$TPL_DIR" ] || TPL_DIR="$(dirname "$(readlink -f "$0")")/../ops/templates"
+[ -f "$TPL_DIR/SOUL.md.template" ] || oj::die "templates not found (looked in $TPL_DIR)"
+PREAMBLE_SRC="${OPENJAWZ_PREAMBLE:-$OPENJAWZ_SHARE/ops/subagent-preamble.md}"
+[ -f "$PREAMBLE_SRC" ] || PREAMBLE_SRC="$TPL_DIR/../subagent-preamble.md"
+IDENTITY="$OPENJAWZ_CONFIG/identity.env"
+
+# ── defaults ─────────────────────────────────────────────────────────────────
+d_user=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f5 | cut -d, -f1)
+d_user=${OPENJAWZ_USER_NAME:-${d_user:-$(id -un)}}
+d_agent=${OPENJAWZ_AGENT_NAME:-Agent}
+d_does=${OPENJAWZ_USER_DOES:-"builds things on Linux"}
+d_voice=${OPENJAWZ_VOICE:-"terse and professional; dry humour allowed; no filler"}
+d_push=${OPENJAWZ_PUSHBACK:-"scope creep, shipping without tests, destructive commands run in a hurry"}
+d_never=${OPENJAWZ_NEVER:-"send messages on my behalf, run destructive git commands, touch production without asking"}
+d_profile=${OPENJAWZ_PROFILE:-${PROFILE:-}}
+if [ -z "$d_profile" ]; then
+  if [ "$(uname -m)" = aarch64 ]; then d_profile=deck
+  elif [ ! -d /dev/dri ]; then d_profile=vm
+  elif compgen -G '/proc/acpi/button/lid/*' >/dev/null; then d_profile=laptop
+  else d_profile=desktop; fi
+fi
+d_mem=${OPENJAWZ_MEMORY_MODE:-"everything except secrets"}
+d_build=${OPENJAWZ_BUILD_RULE:-"builds and tests run on this machine"}
+d_model=${OPENJAWZ_MODEL:-anthropic/claude-sonnet-latest}
+d_home=${OPENJAWZ_HOME}
+
+# re-run: keep previous answers as defaults
+if [ -r "$IDENTITY" ] && [ $FORCE = 0 ]; then
+  # shellcheck disable=SC1090
+  . "$IDENTITY"
+  d_agent=${AGENT_NAME:-$d_agent}; d_user=${USER_NAME:-$d_user}; d_does=${USER_DOES:-$d_does}
+  d_voice=${VOICE:-$d_voice}; d_push=${PUSHBACK:-$d_push}; d_never=${NEVER:-$d_never}
+  d_profile=${PROFILE:-$d_profile}; d_mem=${MEMORY_MODE:-$d_mem}; d_build=${BUILD_RULE:-$d_build}
+  d_model=${MODEL:-$d_model}
+fi
+
+# ── ask: gum → whiptail → read -r ; all from /dev/tty; --yes = defaults ───────
+TTY=$(oj::tty || true)
+UI=none
+if [ -n "$TTY" ]; then
+  if oj::have gum; then UI=gum; elif oj::have whiptail; then UI=whiptail; else UI='read'; fi
+fi
+ask() { # ask "k/7 question" "placeholder" "default"
+  local h=$1 ph=$2 def=$3 v=''
+  case $UI in
+    gum)      v=$(gum input --header "$h" --placeholder "$ph" --value "$def" --width 80 < "$TTY" || true);;
+    whiptail) v=$(whiptail --title "OpenJAWZ" --inputbox "$h" 10 78 "$def" 3>&1 1>&2 2>&3 < "$TTY" || true);;
+    read)     printf '\n%s\n  [%s]\n> ' "$h" "$def" > "$TTY"; IFS= read -r v < "$TTY" || true;;
+  esac
+  printf '%s' "${v:-$def}"
+}
+choose() { # choose "k/7 question" "default" opt...
+  local h=$1 def=$2; shift 2; local v=''
+  case $UI in
+    gum)      v=$(gum choose --header "$h" --selected "$def" "$@" < "$TTY" || true);;
+    whiptail) local items=(); local o; for o in "$@"; do items+=("$o" ""); done
+              v=$(whiptail --title "OpenJAWZ" --menu "$h" 16 78 6 "${items[@]}" --default-item "$def" 3>&1 1>&2 2>&3 < "$TTY" || true);;
+    read)     printf '\n%s  (%s)\n  [%s]\n> ' "$h" "$*" "$def" > "$TTY"; IFS= read -r v < "$TTY" || true;;
+  esac
+  printf '%s' "${v:-$def}"
+}
+
+if [ $RENDER_ONLY = 1 ] || [ "$UI" = none ]; then
+  AGENT_NAME=$d_agent USER_NAME=$d_user USER_DOES=$d_does VOICE=$d_voice PUSHBACK=$d_push NEVER=$d_never
+  PROFILE=$d_profile MEMORY_MODE=$d_mem BUILD_RULE=$d_build MODEL=$d_model
+else
+  AGENT_NAME=$(ask "1/7  What do you want to call the agent?" "one word" "$d_agent")
+  USER_NAME=$(ask  "2/7  What should it call you?" "your name" "$d_user")
+  USER_DOES=$(ask  "3/7  In one line: what do you do?" "e.g. backend engineer, Rust, infra; or: student, physics" "$d_does")
+  VOICE=$(choose   "4/7  How should it talk to you?" "$d_voice" \
+            "terse and professional; dry humour allowed; no filler" \
+            "warm and casual; explains as it goes" \
+            "dry and sardonic; short; never a yes-man" \
+            "write my own")
+  [ "$VOICE" = "write my own" ] && VOICE=$(ask "4/7  Describe the voice in one sentence" "how it talks" "$d_voice")
+  PUSHBACK=$(ask   "5/7  What should it push back on?" "e.g. scope creep, shipping without tests, working past 2am" "$d_push")
+  NEVER=$(ask      "6/7  What should it never do?" "e.g. send email for me, destructive git, touch prod" "$d_never")
+  PROFILE=$(choose "7/7  Where is this machine in the spectrum?" "$d_profile" desktop laptop deck vm)
+  MEMORY_MODE=$(choose "Memory policy — what may the brain keep?" "$d_mem" "everything except secrets" "work only" "ask each session")
+  MODEL=$(ask      "Model (provider/model). Credentials come later via \`synaps login\`" "provider/model" "$d_model")
+  BUILD_RULE=$d_build
+fi
+OPENJAWZ_HOME=$d_home
+export AGENT_NAME USER_NAME USER_DOES VOICE PUSHBACK NEVER PROFILE MEMORY_MODE BUILD_RULE OPENJAWZ_HOME MODEL
+
+# no newlines or leading/trailing space in answers (they go into key=value and one-line identity)
+for k in AGENT_NAME USER_NAME USER_DOES VOICE PUSHBACK NEVER PROFILE MEMORY_MODE BUILD_RULE MODEL; do
+  v=${!k}; v=${v//$'\n'/ }; v=$(printf '%s' "$v" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'); printf -v "$k" '%s' "$v"
+done
+case $PROFILE in desktop|laptop|deck|vm) ;; *) oj::die "profile must be desktop|laptop|deck|vm (got '$PROFILE')";; esac
+
+# ── confirm ──────────────────────────────────────────────────────────────────
+if [ "$UI" = gum ] && [ $RENDER_ONLY = 0 ]; then
+  gum confirm "Write identity for $USER_NAME / $AGENT_NAME ($PROFILE, memory: $MEMORY_MODE)?" < "$TTY" || exit 130
+fi
+
+# ── write identity.env (0600) ────────────────────────────────────────────────
+mkdir -p "$OPENJAWZ_CONFIG"
+oj::render "$TPL_DIR/identity.env.template" "$IDENTITY"
+chmod 0600 "$IDENTITY"
+oj::log ok "identity.env → $IDENTITY"
+
+# ── render the rest ──────────────────────────────────────────────────────────
+mkdir -p "$OPENJAWZ_HOME" "$OPENJAWZ_HOME/context/active" "$OPENJAWZ_HOME/context/full" \
+         "$OPENJAWZ_HOME/notes/journal" "$OPENJAWZ_HOME/workspace/archive" "$OPENJAWZ_DATA" "$SYNAPS_BASE_DIR"
+oj::render "$TPL_DIR/SOUL.md.template"   "$OPENJAWZ_HOME/SOUL.md"
+oj::render "$TPL_DIR/OP.md.template"     "$OPENJAWZ_HOME/OP.md"
+oj::render "$TPL_DIR/AGENTS.md.template" "$OPENJAWZ_HOME/AGENTS.md"
+oj::render "$TPL_DIR/system.md.template" "$SYNAPS_BASE_DIR/system.md"
+oj::render "$PREAMBLE_SRC"               "$SYNAPS_BASE_DIR/subagent-preamble.md"
+oj::log ok "rendered SOUL.md OP.md AGENTS.md → $OPENJAWZ_HOME ; system.md subagent-preamble.md → $SYNAPS_BASE_DIR"
+
+# seed the engram files the shutdown verifier expects (only where absent)
+seed() { [ -e "$1" ] || printf '%s\n' "$2" > "$1"; }
+seed "$OPENJAWZ_HOME/context/active/handoff.md" $'# Handoff\n\nNo active handoff.'
+seed "$OPENJAWZ_HOME/context/active/checkpoint.md" "# Checkpoint — none (fresh install $(date -I))"
+seed "$OPENJAWZ_HOME/context/active/sessions_recent.md" $'# Recent Sessions\n'
+seed "$OPENJAWZ_HOME/context/full/sessions_full.md" $'# Session Log\n'
+seed "$OPENJAWZ_HOME/context/active/projects_active.md" $'# Active Projects\n'
+seed "$OPENJAWZ_HOME/context/full/projects_full.md" $'# Projects — full\n'
+seed "$OPENJAWZ_HOME/context/people.md" $'# People\n'
+seed "$OPENJAWZ_DATA/tasks.json" '{"next_id": 1, "tasks": []}'
+seed "$OPENJAWZ_DATA/tasks_history.json" '{"tasks": []}'
+
+# ── config: identity= (one line from SOUL "Who am I") + agent_name= ; idempotent ──
+CFG="$SYNAPS_BASE_DIR/config"
+touch "$CFG"
+identity_line="You are $AGENT_NAME, an agent running on Synaps, living in $USER_NAME's machine. You work for $USER_NAME: $USER_DOES."
+set_key() { # set_key KEY VALUE — replace the line if present, else append
+  local k=$1 v=$2 tmp
+  tmp=$(mktemp)
+  if grep -qE "^[[:space:]]*${k}[[:space:]]*=" "$CFG"; then
+    awk -v k="$k" -v v="$v" 'BEGIN{done=0} $0 ~ "^[[:space:]]*"k"[[:space:]]*=" && !done {print k" = "v; done=1; next} {print}' "$CFG" > "$tmp"
+  else
+    cat "$CFG" > "$tmp"; printf '%s = %s\n' "$k" "$v" >> "$tmp"
+  fi
+  cat "$tmp" > "$CFG"; rm -f "$tmp"
+}
+set_key identity "$identity_line"
+set_key agent_name "$AGENT_NAME"
+set_key model "$MODEL"
+oj::log ok "config: identity= agent_name= model= → $CFG"
+
+# ── done: the daemon caches identity process-wide ────────────────────────────
+if [ $RENDER_ONLY = 0 ]; then
+  if oj::have synaps && oj::daemon_alive; then
+    synaps daemon reload >/dev/null 2>&1 && oj::log ok "synaps daemon reload" || oj::log warn "synaps daemon reload failed — restart the daemon to pick up the new identity"
+  else
+    oj::log info "daemon not running; identity will load on next start"
+  fi
+fi
+printf '\nIdentity written. Edit answers any time: %s  then  openjawz onboard\nCredentials: synaps login   (never asked here, never stored in identity.env)\n' "$IDENTITY"

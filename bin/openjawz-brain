@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# openjawz-brain: init | status | backup | consolidate — the brain, one writer, never in git
-# usage: openjawz brain init|status|backup [--quick]|consolidate
+# openjawz-brain: init | status | backup | consolidate | scan | purge — the brain, one file, never in git
+# usage: openjawz brain init|status|backup [--quick]|consolidate|scan|purge [--yes]
 # owner: openjawz-brain
 # ci: fast
 #
-# init: fresh .r8 named after the agent, sources.toml + axel.toml from the defaults, index notes/context,
-#       first handoff, enable the consolidation timer. Exit 2 (skip) when axel is not installed.
+# init: fresh .r8 named after the agent, sources.toml + axel.toml from the defaults, mcp.json axel entry,
+#       index notes/context, first handoff, enable the consolidation timer. Exit 2 (skip) when axel is absent.
+# scan: secret-pattern scan of stored memories (python sqlite3 + REGEXP); matches are DELETED and logged
+#       to $OPENJAWZ_STATE/brain-scrub.log. consolidate runs it last.
+# purge: remove the brain (.r8 + .hnsw + sources.toml) after asking — `openjawz uninstall --purge` calls this.
 set -euo pipefail
+umask 077
 export OJ_CMD=brain
 # shellcheck source=../ops/lib/source-lib.sh
 . "$(dirname "$(readlink -f "$0")")/../ops/lib/source-lib.sh"
@@ -22,12 +26,63 @@ SHARE="${OPENJAWZ_BRAIN:-$OPENJAWZ_SHARE/brain}"
 [ -d "$SHARE" ] || SHARE="$(dirname "$(readlink -f "$0")")/../brain"
 BACKUPS="$OPENJAWZ_STATE/brain-backups"
 
+# merge mcp.json.default's axel entry into ~/.synaps-cli/mcp.json when absent (the MCP server is the tool-call spawner;
+# plugins/axel is the extension for session-end extraction — two processes, one .r8; docs/brain.md)
+mcp_wire() {
+  local def="${OPENJAWZ_MCP_DEFAULT:-$OPENJAWZ_SHARE/daemon/mcp.json.default}" out="$SYNAPS_BASE_DIR/mcp.json" tmp
+  [ -r "$def" ] || def="$(dirname "$(readlink -f "$0")")/../daemon/mcp.json.default"
+  [ -r "$def" ] || { oj::log warn "mcp.json.default not found — add the axel server to $out by hand"; return 0; }
+  oj::have jq || { oj::log warn "jq missing — add the axel server to $out by hand"; return 0; }
+  mkdir -p "$SYNAPS_BASE_DIR"
+  if [ -s "$out" ] && [ "$(jq -r '.mcpServers.axel // empty | type' "$out" 2>/dev/null)" = object ]; then
+    oj::log info "mcp.json: axel server already present"; return 0; fi
+  tmp=$(mktemp)
+  if [ -s "$out" ]; then jq -s '.[0] * {mcpServers: {axel: .[1].mcpServers.axel}}' "$out" "$def" > "$tmp" || { rm -f "$tmp"; oj::log warn "mcp.json is not JSON — left untouched"; return 0; }
+  else cp "$def" "$tmp"; fi
+  install -m600 "$tmp" "$out"; rm -f "$tmp"; oj::log ok "mcp.json: axel server added ($out)"
+}
+# scan: every pattern in secret-patterns.txt against memories via python's sqlite3 (the CLI has no REGEXP).
+# hit → delete (axel forget when this axel has it, else a plain DELETE) → one line per row in brain-scrub.log.
+scan() {
+  [ -f "$BRAIN" ] || { oj::log info "no brain to scan"; return 0; }
+  [ -r "$SHARE/secret-patterns.txt" ] || { oj::log warn "secret-patterns.txt missing — scan skipped"; return 0; }
+  oj::have python3 || { oj::log warn "python3 missing — scan skipped"; return 0; }
+  local log="$OPENJAWZ_STATE/brain-scrub.log" hits n=0 id pi ok
+  mkdir -p "$OPENJAWZ_STATE"; [ -e "$log" ] || install -m600 /dev/null "$log"
+  hits=$(python3 - "$BRAIN" "$SHARE/secret-patterns.txt" <<'PY'
+import re, sqlite3, sys
+db, pats = sys.argv[1], sys.argv[2]
+rx = [(i + 1, re.compile(l.rstrip("\n"))) for i, l in enumerate(open(pats, encoding="utf-8", errors="replace"))
+      if l.strip() and not l.startswith("#")]
+con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+con.create_function("REGEXP", 2, lambda pat, s: 1 if s is not None and re.search(pat, str(s)) else 0)
+cols = [r[1] for r in con.execute("PRAGMA table_info(memories)")]
+if "id" not in cols: sys.exit(0)
+text = " || char(10) || ".join(f"coalesce({c}, '')" for c in ("content", "title", "abstract_text") if c in cols)
+seen = set()
+for n, r in rx:
+    for (mid,) in con.execute(f"SELECT id FROM memories WHERE ({text}) REGEXP ?", (r.pattern,)):
+        if mid not in seen: seen.add(mid); print(f"{mid}\t{n}")
+PY
+) || { oj::log warn "scan failed (is $BRAIN a readable SQLite file?)"; return 0; }
+  [ -n "$hits" ] || { oj::log info "scan: no secret-shaped memories"; return 0; }
+  sql_delete() { python3 -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("DELETE FROM memories WHERE id = ?",(sys.argv[2],)); c.commit()' "$1" "$2"; }
+  while IFS=$'\t' read -r id pi; do
+    [ -n "$id" ] || continue; ok=0
+    if axel forget --help >/dev/null 2>&1 && axel forget --brain "$BRAIN" "$id" >/dev/null 2>&1; then ok=1
+    elif sql_delete "$BRAIN" "$id" 2>/dev/null; then ok=1; fi
+    if [ $ok = 1 ]; then printf '%s %s pattern-%s deleted\n' "$(date -Is)" "$id" "$pi" >> "$log"; n=$((n+1))
+    else printf '%s %s pattern-%s DELETE-FAILED\n' "$(date -Is)" "$id" "$pi" >> "$log"; oj::log warn "scan: could not delete $id — review with: axel memories"; fi
+  done <<< "$hits"
+  oj::log warn "secret-shaped content in $n memories — deleted and logged: $log"
+}
+
 need_axel() { oj::have axel || { oj::log warn "axel not installed — the brain is absent (install axel-bin)"; exit 2; }; }
 
 case $cmd in
   init)
     need_axel
-    mkdir -p "$AXEL_DIR" "$OPENJAWZ_HOME/notes" "$OPENJAWZ_HOME/context"
+    install -d -m700 "$AXEL_DIR"; mkdir -p "$OPENJAWZ_HOME/notes" "$OPENJAWZ_HOME/context"
     if [ -f "$BRAIN" ]; then
       oj::log info "brain exists: $BRAIN (keeping it)"
     else
@@ -41,6 +96,7 @@ case $cmd in
       axel index --brain "$BRAIN" "$d" --source "$src" >/dev/null 2>&1 || axel index --brain "$BRAIN" "$d" >/dev/null 2>&1 || oj::log warn "index $src failed"
     done
     axel handoff --brain "$BRAIN" set "Fresh install $(date -I). No prior sessions." >/dev/null 2>&1 || true
+    mcp_wire
     if oj::have systemctl && [ -f /usr/lib/systemd/user/axel-consolidate.timer ]; then
       systemctl --user enable --now axel-consolidate.timer >/dev/null 2>&1 && oj::log ok "axel-consolidate.timer enabled" || oj::log warn "could not enable axel-consolidate.timer"
     fi
@@ -54,7 +110,7 @@ case $cmd in
     printf 'backups: %s\n' "$(ls -1 "$BACKUPS"/*.tar.zst 2>/dev/null | wc -l)";;
   backup)
     [ -f "$BRAIN" ] || { oj::log info "no brain to back up"; exit 2; }
-    mkdir -p "$BACKUPS"
+    install -d -m700 "$BACKUPS"
     out="$BACKUPS/$AGENT_NAME-$(date +%Y%m%d-%H%M%S).tar.zst"
     if oj::have sqlite3 && [ "${1:-}" != "--quick" ]; then
       tmp=$(mktemp -d); sqlite3 "$BRAIN" ".backup '$tmp/$AGENT_NAME.r8'"; [ -f "$BRAIN.hnsw" ] && cp "$BRAIN.hnsw" "$tmp/"
@@ -73,14 +129,17 @@ case $cmd in
       oj::log warn "this axel has no consolidate command — reindexing sources instead"
       for src in notes context; do [ -d "$OPENJAWZ_HOME/$src" ] && axel index --brain "$BRAIN" "$OPENJAWZ_HOME/$src" >/dev/null 2>&1 || true; done
     fi
-    # secret scrub (policy: never stored) — only when the brain is a plain SQLite we can read
-    if oj::have sqlite3 && [ -r "$SHARE/secret-patterns.txt" ]; then
-      n=0
-      while read -r pat; do
-        [ -z "$pat" ] && continue
-        n=$((n + $(sqlite3 "$BRAIN" "SELECT count(*) FROM memories WHERE content REGEXP '$pat'" 2>/dev/null || echo 0)))
-      done < "$SHARE/secret-patterns.txt"
-      [ "$n" -gt 0 ] && oj::log warn "secret-shaped content in $n memories — review with: axel memories" || true
-    fi;;
+    scan;;
+  scan) scan;;
+  purge)
+    yes=0; [ "${1:-}" = --yes ] && yes=1
+    files=(); for f in "$BRAIN" "$BRAIN.hnsw" "$BRAIN-wal" "$BRAIN-shm" "$AXEL_DIR/sources.toml"; do [ -e "$f" ] && files+=("$f"); done
+    [ "${#files[@]}" -gt 0 ] || { oj::log info "no brain at $BRAIN — nothing to purge"; exit 0; }
+    if [ $yes = 0 ] && ! oj::yes; then
+      tty=$(oj::tty) || oj::die "brain purge: not a terminal — pass --yes (or OPENJAWZ_YES=1)" 2
+      printf 'Delete the brain %s (%s files)? This cannot be undone. [y/N] ' "$BRAIN" "${#files[@]}" > "$tty"
+      read -r a < "$tty" || a=n; case $a in y|Y|yes) ;; *) oj::log info "brain kept"; exit 0;; esac
+    fi
+    rm -f "${files[@]}"; oj::log ok "brain purged: ${files[*]}";;
   *) usage; exit 2;;
 esac

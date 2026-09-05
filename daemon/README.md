@@ -1,6 +1,6 @@
 # daemon/
 
-`synaps-daemon.service` — a plain systemd **user** unit (`Type=simple`, `ExecStart` → `openjawz-daemon-exec` → `synaps daemon --foreground`). Plus `config.default` (flat `key = value`, seeded into `~/.synaps-cli/config`), `mcp.json.default` (the `axel` memory server, `shared: true` — one brain, one writer), `profiles/` (desktop / laptop / deck / vm env files) and `environment.d/10-openjawz.conf` (PATH for the tools).
+`synaps-daemon.service` — a plain systemd **user** unit (`Type=simple`, `ExecStart` → `openjawz-daemon-exec` → `synaps daemon --foreground`). Plus `config.default` (flat `key = value`, seeded into `~/.synaps-cli/config`), `mcp.json.default` (the `axel` MCP server, `shared: true`; `openjawz brain init` merges it into `~/.synaps-cli/mcp.json` — the extension in `plugins/axel` is the second axel process on the same `.r8`, see `docs/brain.md`), `profiles/` (desktop / laptop / deck / vm env files) and `environment.d/10-openjawz.conf` (PATH for the tools).
 
 ## Why not socket activation
 

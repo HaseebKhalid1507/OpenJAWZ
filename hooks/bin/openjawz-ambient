@@ -56,6 +56,7 @@ attached_id() { sed -nE 's/.*\[attached ([0-9]{8}-[0-9]{6}-[0-9a-f]{4}).*/\1/p' 
 cache_id() { mkdir -p "$OPENJAWZ_STATE"; printf '%s\n' "$1" > "$IDFILE"; }
 
 cmd_ensure() {
+  oj::lock ambient-ensure   # serialize concurrent ensures: the live_id check + create is not atomic → duplicate-create race
   daemon_up || oj::die "daemon did not come up (synaps daemon status)" 1
   local id
   id=$(live_id) || true

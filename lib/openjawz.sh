@@ -127,7 +127,8 @@ oj::daemon_alive() { synaps daemon status >/dev/null 2>&1; }
 oj::ambient_id() { cat "$OPENJAWZ_STATE/ambient.id" 2>/dev/null || return 1; }
 # the ambient session is addressed by NAME (runtime names at create); the id cache is the fallback
 oj::ambient_target() { printf '%s\n' "${OPENJAWZ_AMBIENT:-ambient}"; }
-# oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — THE delivery leg (the only `synaps send` in the tree).
+# oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — THE hooks delivery leg (the only `synaps send` in the
+# hooks/bridge pipeline; the heartbeat plugin fires its own session-addressed keepalive, see plugins/heartbeat).
 # Targets the session by NAME (--session ambient); the cached id (ambient.id) is the fallback.
 # Exit 0 from `send` also covers the inbox fallback — stderr is the truth: returns 1 (and logs) on
 # inbox / No session / no daemon / daemon unavailable, so the caller can re-ensure and retry.

@@ -49,11 +49,13 @@ else
   oj::log info "no openjawz packages installed"
 fi
 # bytecode a root process may have dropped under /usr/share/openjawz (unowned — pacman -Qo fails)
-if [ -d "$OPENJAWZ_SHARE" ]; then
+if [ -d "$OPENJAWZ_SHARE" ] && share_rp=$(realpath -e -- "$OPENJAWZ_SHARE" 2>/dev/null); then
   while IFS= read -r d; do
-    pacman -Qo "$d" >/dev/null 2>&1 || oj::run $sudo rm -rf "$d"
-  done < <(find "$OPENJAWZ_SHARE" -type d -name __pycache__ 2>/dev/null)
-  $sudo rmdir "$OPENJAWZ_SHARE" 2>/dev/null || true
+    dr=$(realpath -e -- "$d" 2>/dev/null) || continue
+    case "$dr/" in "$share_rp"/*) ;; *) continue ;; esac   # containment: env-derived SHARE must not point a root rm -rf outside its own tree
+    pacman -Qo "$dr" >/dev/null 2>&1 || oj::run $sudo rm -rf "$dr"
+  done < <(find "$share_rp" -type d -name __pycache__ 2>/dev/null)
+  $sudo rmdir "$share_rp" 2>/dev/null || true
 fi
 
 # 4. repo: the Include (public path), the sync db (both paths), the local-repo marker
@@ -77,8 +79,11 @@ fi
 if [ "$keep" = 0 ]; then
   # the files install wrote under ~/.synaps-cli, from the manifest — never a glob
   if [ -r "$manifest" ]; then
+    base_rp=$(realpath -m -- "$SYNAPS_BASE_DIR")
     while IFS= read -r p; do
-      case "$p" in "$SYNAPS_BASE_DIR"/*) rm -f "$p" ;; esac
+      [ -n "$p" ] || continue
+      pr=$(realpath -m -- "$p") || continue          # resolve .. before the containment check
+      case "$pr/" in "$base_rp"/*) rm -f "$pr" ;; esac  # a manifest line with .. cannot escape the base dir
     done < "$manifest"
   fi
   if [ "$all" = 1 ]; then rm -rf "$SYNAPS_BASE_DIR"

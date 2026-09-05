@@ -90,6 +90,7 @@ if [ -n "$local_dir" ]; then
   # a stale signed db from an earlier signed repo would poison the unsigned sync
   oj::run $sudo rm -f /var/lib/pacman/sync/openjawz.db /var/lib/pacman/sync/openjawz.files /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig
   oj::run $sudo pacman --config "$tmp/pacman.conf" -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta
+  mkdir -p "$(dirname "$marker")"   # config dir may be absent on a fresh box; set -e would abort before migrate/reload
   printf '%s\n' "$local_dir" > "$marker"
 else
   oj::run $sudo pacman -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta

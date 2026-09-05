@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# /usr/lib/openjawz/openjawz.sh — the one shared library.
+# Sourced by every openjawz-* script:   . /usr/lib/openjawz/openjawz.sh
+# bash >= 5. No side effects except oj::paths (exports). Never overrides env that is already set.
+# shellcheck disable=SC2034
+
+[ -n "${OJ_LIB_LOADED:-}" ] && return 0
+OJ_LIB_LOADED=1
+
+# ── paths ────────────────────────────────────────────────────────────────────
+oj::paths() {
+  export OPENJAWZ_SHARE="${OPENJAWZ_SHARE:-/usr/share/openjawz}"
+  export OPENJAWZ_LIB="${OPENJAWZ_LIB:-/usr/lib/openjawz}"
+  export OPENJAWZ_TOOLS="${OPENJAWZ_TOOLS:-$OPENJAWZ_LIB/tools}"
+  export OPENJAWZ_CONFIG="${OPENJAWZ_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/openjawz}"
+  export OPENJAWZ_STATE="${OPENJAWZ_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/openjawz}"
+  export OPENJAWZ_HOME="${OPENJAWZ_HOME:-$HOME/.local/share/openjawz}"
+  export OPENJAWZ_DATA="${OPENJAWZ_DATA:-$OPENJAWZ_HOME/data}"
+  export OPENJAWZ_RUN="${OPENJAWZ_RUN:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openjawz}"
+  export SYNAPS_BASE_DIR="${SYNAPS_BASE_DIR:-$HOME/.synaps-cli}"
+  export SYNAPS_RUN="${SYNAPS_RUNTIME_DIR:-$SYNAPS_BASE_DIR/run}"
+  export OJ_CMD="${OJ_CMD:-$(basename "${BASH_SOURCE[-1]:-openjawz}")}"
+  local f
+  for f in "$OPENJAWZ_CONFIG/identity.env" "$OPENJAWZ_CONFIG/profile.env"; do
+    [ -r "$f" ] && oj::_load_env "$f"
+  done
+  return 0
+}
+
+# load KEY=VALUE lines; existing env wins
+oj::_load_env() {
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"; val="${line#*=}"
+    key="${key#export }"; key="${key// /}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    val="${val#\"}"; val="${val%\"}"
+    [ -z "${!key+x}" ] && export "$key=$val"
+  done < "$1"
+}
+
+# ── logging ──────────────────────────────────────────────────────────────────
+oj::_color() { [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; }
+oj::log() {
+  local level="$1"; shift
+  local msg="$*" c="" r=""
+  if oj::_color; then
+    r=$'\e[0m'
+    case "$level" in info) c=$'\e[34m' ;; ok) c=$'\e[32m' ;; warn) c=$'\e[33m' ;; err) c=$'\e[31m' ;; esac
+  fi
+  printf '%s%-4s%s %s\n' "$c" "$level" "$r" "$msg" >&2
+  if [ -n "${OPENJAWZ_STATE:-}" ]; then
+    mkdir -p "$OPENJAWZ_STATE" 2>/dev/null &&
+      printf '%s %s [%s] %s\n' "$(date -Is)" "${OJ_CMD:-openjawz}" "$level" "$msg" >> "$OPENJAWZ_STATE/openjawz.log" 2>/dev/null
+  fi
+  return 0
+}
+oj::die() { oj::log err "$1"; exit "${2:-1}"; }
+
+# ── predicates ───────────────────────────────────────────────────────────────
+oj::have() { command -v "$1" >/dev/null 2>&1; }
+oj::is_arch() {
+  [ -r /etc/os-release ] || return 1
+  local ID="" ID_LIKE=""
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case " $ID $ID_LIKE " in *arch*) return 0 ;; esac
+  return 1
+}
+oj::is_root() { [ "$(id -u)" -eq 0 ]; }
+oj::sudo() {
+  if oj::is_root; then echo ""; return 0; fi
+  if oj::have sudo; then echo sudo; elif oj::have doas; then echo doas; else oj::die "need sudo or doas"; fi
+}
+oj::yes() { [ "${OPENJAWZ_YES:-0}" = 1 ]; }
+# every prompt does:  read -r x < "$(oj::tty)" || x=default
+oj::tty() {
+  oj::yes && return 1
+  [ -r /dev/tty ] && [ -w /dev/tty ] && { true < /dev/tty; } 2>/dev/null || return 1
+  echo /dev/tty
+}
+oj::version() { cat "${OPENJAWZ_SHARE:-/usr/share/openjawz}/VERSION" 2>/dev/null || echo unknown; }
+
+# ── execution ────────────────────────────────────────────────────────────────
+oj::run() {
+  if [ "${OPENJAWZ_DRY_RUN:-0}" = 1 ]; then printf '+ %s\n' "$*"; return 0; fi
+  oj::log info "+ $*" >/dev/null 2>&1
+  "$@"
+}
+oj::lock() {
+  local name="$1"
+  mkdir -p "$OPENJAWZ_RUN"
+  exec {OJ_LOCK_FD}>"$OPENJAWZ_RUN/$name.lock"
+  flock -n "$OJ_LOCK_FD" || oj::die "openjawz $name: already running"
+  export OJ_LOCK_FD
+}
+
+# {{KEY}} → $KEY from identity.env (+ env). Unknown key → die. 0644, or 0600 under $OPENJAWZ_CONFIG.
+oj::render() {
+  local tpl="$1" out="$2" content key val
+  [ -r "$tpl" ] || oj::die "render: no such template $tpl"
+  [ -r "$OPENJAWZ_CONFIG/identity.env" ] && oj::_load_env "$OPENJAWZ_CONFIG/identity.env"
+  content="$(cat "$tpl")"
+  while [[ "$content" =~ \{\{([A-Z_][A-Z0-9_]*)\}\} ]]; do
+    key="${BASH_REMATCH[1]}"
+    [ -n "${!key+x}" ] || oj::die "render: $tpl needs {{$key}} but it is not set (identity.env)"
+    val="${!key}"
+    content="${content//"{{$key}}"/$val}"
+  done
+  mkdir -p "$(dirname "$out")"
+  printf '%s\n' "$content" > "$out"
+  case "$out" in "$OPENJAWZ_CONFIG"/*) chmod 0600 "$out" ;; *) chmod 0644 "$out" ;; esac
+}
+
+# ── daemon / events ──────────────────────────────────────────────────────────
+oj::daemon_alive() { synaps daemon status >/dev/null 2>&1; }
+oj::ambient_id() { cat "$OPENJAWZ_STATE/ambient.id" 2>/dev/null || return 1; }
+# oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — one event, one connection, always --session, never --broadcast
+oj::send() {
+  local src="$1" ct="$2" sev="$3" text="$4" id err
+  id="$(oj::ambient_id)" || { oj::log warn "send: no ambient session id"; return 1; }
+  err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)" || {
+    oj::log warn "send: $err"; return 1; }
+  case "$err" in *inbox*) oj::log warn "send: fell to inbox: $err"; return 1 ;; esac
+  return 0
+}
+oj::json_escape() { printf '%s' "$1" | jq -Rr @json; }
+
+# oj::stage NAME CMD… — prints "[NAME] ok|skip|FAIL"; exit 2 = skip; 127 = not installed
+oj::stage() {
+  local name="$1"; shift
+  local rc=0 out
+  out="$("$@" 2>&1)" || rc=$?
+  case "$rc" in
+    0)   printf '[%s] ok\n' "$name" ;;
+    2)   printf '[%s] skip%s\n' "$name" "${out:+ ($(printf '%s' "$out" | tail -1))}" ;;
+    127) printf '[%s] skip (not installed)\n' "$name" ;;
+    *)   printf '[%s] FAIL (exit %s)\n' "$name" "$rc"; [ -n "$out" ] && printf '%s\n' "$out" | tail -5 ;;
+  esac
+  oj::log info "stage $name rc=$rc" >/dev/null 2>&1
+  [ "$rc" = 0 ] || [ "$rc" = 2 ] || [ "$rc" = 127 ] || return "$rc"
+  return 0
+}

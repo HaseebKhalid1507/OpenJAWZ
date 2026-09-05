@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# openjawz-uninstall: disable units → pacman -Rns → remove the repo Include → ask about the brain
+# usage: openjawz uninstall [--yes] [--keep-brain | --purge] [--all]
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
+oj::paths
+keep=""; all=0
+for a in "$@"; do case "$a" in --yes|-y) export OPENJAWZ_YES=1 ;; --keep-brain) keep=1 ;; --purge) keep=0 ;; --all) all=1 ;; -h|--help) sed -n '2,4p' "$0"; exit 0 ;; esac; done
+oj::is_root && oj::die "run as your user, not root"
+sudo="$(oj::sudo)"
+
+# 1. units
+if systemctl --user --version >/dev/null 2>&1; then
+  while IFS= read -r u; do
+    [ -n "$u" ] && systemctl --user disable --now "$u" >/dev/null 2>&1 || true
+  done < <(systemctl --user list-unit-files 'openjawz-*' 'synaps-*' 'axel-*' --no-legend 2>/dev/null | awk '{print $1}')
+  oj::log ok "user units disabled"
+fi
+synaps daemon stop >/dev/null 2>&1 || true
+
+# 2. per-user symlinks we made
+if [ -d "$SYNAPS_BASE_DIR/plugins" ]; then
+  for l in "$SYNAPS_BASE_DIR"/plugins/*; do
+    [ -L "$l" ] && case "$(readlink "$l")" in "$OPENJAWZ_SHARE"/*) rm -f "$l" ;; esac
+  done
+fi
+
+# 3. packages
+mapfile -t pkgs < <(pacman -Qq 2>/dev/null | grep -E '^openjawz-' || true)
+if [ "$all" = 1 ]; then while IFS= read -r p; do [ -n "$p" ] && pkgs+=("$p"); done < <(pacman -Qq 2>/dev/null | grep -E '^(synaps-bin|axel-bin)$' || true); fi
+if [ "${#pkgs[@]}" -gt 0 ]; then
+  oj::run $sudo pacman -Rns ${OPENJAWZ_YES:+--noconfirm} "${pkgs[@]}"
+else
+  oj::log info "no openjawz packages installed"
+fi
+
+# 4. repo
+if [ -e /etc/pacman.d/openjawz.conf ]; then
+  oj::run $sudo sed -i '/^Include = \/etc\/pacman.d\/openjawz.conf$/d' /etc/pacman.conf
+  oj::run $sudo rm -f /etc/pacman.d/openjawz.conf
+  oj::log ok "repo line removed"
+fi
+
+# 5. the brain
+if [ -z "$keep" ]; then
+  keep=1
+  if t="$(oj::tty)"; then
+    printf 'Remove your brain and state too (%s, %s)? [y/N] ' "$OPENJAWZ_HOME" "$OPENJAWZ_STATE"
+    read -r ans < "$t" || ans=n
+    [ "$ans" = y ] || [ "$ans" = Y ] && keep=0
+  fi
+fi
+if [ "$keep" = 0 ]; then
+  rm -rf "$OPENJAWZ_HOME" "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_RUN"
+  echo "purged $OPENJAWZ_HOME $OPENJAWZ_STATE $OPENJAWZ_CONFIG"
+else
+  echo "kept: $OPENJAWZ_HOME (brain) · $OPENJAWZ_STATE (state) · $OPENJAWZ_CONFIG · ~/.synaps-cli · ~/.config/axel"
+fi
+echo "OpenJAWZ removed."

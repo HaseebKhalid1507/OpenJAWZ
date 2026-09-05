@@ -65,7 +65,7 @@ package_openjawz-meta() {
               'libnotify: notifications out'
               'inotify-tools: fs hook'
               'socat: desktop hook')
-  _license "$pkgname"
+  _license openjawz-meta
 }
 
 package_openjawz-core() {
@@ -91,7 +91,7 @@ package_openjawz-core() {
   [[ -d skel ]] && cp -a skel "$pkgdir/$_share/skel"
   install -Dm644 packages/openjawz/95-openjawz-migrations.hook -t "$pkgdir/usr/share/libalpm/hooks/"
   install -Dm644 daemon/openjawz-migrate-notify.service -t "$pkgdir/$_units/"
-  _license "$pkgname"
+  _license openjawz-core
 }
 
 package_openjawz-daemon() {
@@ -104,7 +104,7 @@ package_openjawz-daemon() {
   install -d "$pkgdir/$_share/daemon/profiles"
   install -m644 daemon/profiles/*.env -t "$pkgdir/$_share/daemon/profiles/"
   install -Dm644 daemon/environment.d/10-openjawz.conf -t "$pkgdir/usr/lib/environment.d/"
-  _license "$pkgname"
+  _license openjawz-daemon
 }
 
 package_openjawz-hooks() {
@@ -132,7 +132,7 @@ package_openjawz-hooks() {
   _bins hooks/bin "$pkgdir/$_lib/bin"
   _units_from hooks
   [[ -f daemon/openjawz-ambient.service ]] && install -Dm644 daemon/openjawz-ambient.service -t "$pkgdir/$_units/"
-  _license "$pkgname"
+  _license openjawz-hooks
 }
 
 package_openjawz-ui() {
@@ -148,7 +148,7 @@ package_openjawz-ui() {
   for f in ui/hotkey/*.conf ui/bar/*.jsonc ui/bar/*.css; do [[ -f "$f" ]] && install -m644 "$f" -t "$pkgdir/$_share/ui/"; done
   [[ -d ui/bar/quickshell ]] && cp -a ui/bar/quickshell "$pkgdir/$_share/ui/"
   [[ -d ui/themes ]] && cp -a ui/themes "$pkgdir/$_share/ui/"
-  _license "$pkgname"
+  _license openjawz-ui
 }
 
 package_openjawz-crew() {
@@ -161,7 +161,7 @@ package_openjawz-crew() {
   [[ -f crew/subagent-preamble.md ]] && install -m644 crew/subagent-preamble.md -t "$pkgdir/$_share/crew/"
   _bins crew/tools "$pkgdir/$_lib/tools" openjawz-
   _bins crew/bin "$pkgdir/$_lib/bin"
-  _license "$pkgname"
+  _license openjawz-crew
 }
 
 package_openjawz-ops() {
@@ -181,7 +181,7 @@ package_openjawz-ops() {
     install -d "$pkgdir/$_share/plugins"
     for d in plugins/*/; do cp -a "$d" "$pkgdir/$_share/plugins/"; done
   fi
-  _license "$pkgname"
+  _license openjawz-ops
 }
 
 package_openjawz-brain() {
@@ -198,5 +198,5 @@ package_openjawz-brain() {
     else install -m644 "$f" -t "$pkgdir/$_share/brain/"; fi
   done
   _bins brain/bin "$pkgdir/$_lib/bin"
-  _license "$pkgname"
+  _license openjawz-brain
 }

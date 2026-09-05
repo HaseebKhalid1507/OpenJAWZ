@@ -30,7 +30,7 @@ fi
 ver="$(cat "$src/VERSION")"
 
 if [ "$throwaway" = 1 ]; then
-  export GNUPGHOME="$work/gnupg"; mkdir -m700 -p "$GNUPGHOME"
+  export GNUPGHOME="$work/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
   gpg --batch --quiet --passphrase '' --quick-gen-key "OpenJAWZ throwaway (CI) <ci@localhost>" ed25519 sign 0 >/dev/null 2>&1
   key="$(gpg --batch --list-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')"
   export OPENJAWZ_KEYS="$work/keys"; mkdir -p "$OPENJAWZ_KEYS"

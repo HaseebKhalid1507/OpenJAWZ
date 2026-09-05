@@ -70,7 +70,7 @@ What it keeps and what it never keeps: `/usr/share/openjawz/brain/memory-policy.
 ## 5. First session
 
 ```bash
-synaps                          # attach to the daemon; the system prompt is your rendered SOUL
+synaps --attach                 # the TUI, attached to the daemon; the system prompt is your rendered SOUL
 ```
 The agent's first move is `openjawz boot` (its OP.md tells it so). You will see: Identity → Work → World.
 On a fresh install that is: no journal yet, "No active handoff.", no tasks, no sessions.

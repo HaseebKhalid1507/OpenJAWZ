@@ -45,9 +45,9 @@ Every agent CLI you've used spawns a full engine, its own memory, and its own si
 | | per additional terminal |
 |---|---:|
 | engine-per-terminal | 40–260 MB |
-| OpenJAWZ (`synaps --attach --new`) | **~2 MB** |
+| OpenJAWZ (`synaps --attach`, one more TUI on the daemon) | **~2 MB** |
 
-The numbers are the Synaps daemon-mode numbers, measured there (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). The scripts to re-measure are in `tests/memprof/`; the gates are a bench-box run, not CI, and v0.1.0 has not re-run them in this tree. Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
+The numbers are the Synaps daemon-mode numbers, measured there (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). The scripts to re-measure are in `tests/memprof/`; the gates are a bench-box run, not CI, and v0.1.0 has not re-run them in this tree. Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Two spellings, on purpose: `synaps --attach [--new]` is the TUI on the daemon (the hotkey, you); `synaps attach --create` is the line client (scripts, the smoke, the ambient session). Bare `synaps` is the in-process engine. Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
 
 ## The spectrum
 

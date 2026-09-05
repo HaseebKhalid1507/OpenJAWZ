@@ -4,7 +4,8 @@ The loop is: boot → work (checkpoint every ~10 exchanges) → shutdown. Everyt
 
 ## The session
 ```bash
-synaps                          # attach (thin client to the daemon)
+synaps --attach                 # the TUI attached to the daemon (--new: fresh session). Bare `synaps` runs the engine in-process — not what you want here
+synaps attach --create          # the line client, same daemon, for scripts and non-TTY shells
 openjawz boot                   # the agent runs this; you can too — Identity → Work → World
 openjawz checkpoint "…"         # every ~10 exchanges; --append for concurrent sessions; --clear
 openjawz shutdown               # the 7-step checklist, verified first, written last; refuses if the brief/handoff/journal are missing

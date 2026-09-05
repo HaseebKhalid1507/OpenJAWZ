@@ -2,7 +2,8 @@
 # /usr/lib/openjawz/hooks/bridge.sh — sourced by every OpenJAWZ bridge.
 #
 # One delivery path. A bridge shapes an OS event into ONE line and calls
-# bridge::event; delivery is `oj::send` (lib/openjawz.sh) — the only `synaps send` in the tree.
+# bridge::event; delivery is `oj::send` (lib/openjawz.sh) — the only `synaps send` in the hooks pipeline
+# (the heartbeat plugin sends its own addressed keepalive; it is not a bridge).
 # The hook pipeline is a GOVERNED INGRESS: every line passes bridge::redact before anything else.
 #
 #   bridge::init NAME              # source lib, paths, traps, OJ_CMD; NAME = source (desktop|fs|notify|system|chronos|ui|test)

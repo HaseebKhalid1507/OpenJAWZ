@@ -71,6 +71,8 @@ if systemctl --user --version >/dev/null 2>&1; then
     elif [ "$e" = disabled ]; then yellow "$u disabled"
     elif systemctl --user show -p Result --value "$u" 2>/dev/null | grep -q success && systemctl --user status "$u" 2>/dev/null | grep -q 'condition'; then green "$u condition-skipped (no compositor)"
     elif [ "$s" = failed ]; then red "$u failed (journalctl --user -u $u)"
+    elif [ "$s" = inactive ] && [ "$(systemctl --user show -p Result --value "$u" 2>/dev/null)" = success ] && [ "$(systemctl --user show -p ExecMainStatus --value "$u" 2>/dev/null)" = 0 ]; then
+      yellow "$u exited clean (nothing to watch here; journalctl --user -u $u)"
     else yellow "$u $s"; fi
   done < <(systemctl --user list-unit-files 'openjawz-hook-*.service' --no-legend 2>/dev/null | awk '{print $1}')
   if systemctl --user list-unit-files foot-server.socket --no-legend 2>/dev/null | grep -q enabled; then green "foot-server.socket enabled (fast summon)"; fi

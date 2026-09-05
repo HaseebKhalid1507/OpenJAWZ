@@ -32,7 +32,7 @@ case "$mode" in
   pending) if [ "${#pending[@]}" = 0 ]; then echo none; else printf '%s\n' "${pending[@]}"; fi; exit 0 ;;
   list)
     for f in "${files[@]}"; do
-      if [ -e "$mark/$f.running" ]; then s=RUNNING; elif [ -e "$mark/$f" ]; then s=done; else s=pending; fi
+      if [ -e "$mark/$f.running" ]; then s=RUNNING; elif [ -e "$mark/$f" ]; then s="done"; else s=pending; fi
       printf '%-8s %s\n' "$s" "$f"
     done; exit 0 ;;
   seed-all) for f in "${files[@]}"; do : > "$mark/$f"; done; echo "seeded ${#files[@]} marker(s)"; exit 0 ;;

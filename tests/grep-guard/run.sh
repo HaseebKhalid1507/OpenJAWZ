@@ -5,7 +5,7 @@ set -uo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)" || exit 1
 here=tests/grep-guard; fail=0
 v() { [ "${OPENJAWZ_TEST_VERBOSE:-0}" = 1 ] && echo "$@" >&2; return 0; }
-mapfile -t tracked < <(git ls-files)
+mapfile -t tracked < <(git ls-files -co --exclude-standard)
 allow="$(sed -E 's/[[:space:]]+#[^#]*$//' "$here/allow.txt" | grep -v '^$')"
 
 # 1. forbidden words (case-insensitive, word-boundaried), minus the allowlist

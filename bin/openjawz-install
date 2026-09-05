@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# openjawz-install: staged, logged, idempotent per-user setup (config → unit → plugins → crew → brain → onboard → hooks → ambient → ui → migrate → doctor)
+# usage: openjawz install [--yes] [--profile desktop|laptop|deck|vm] [--skip STAGE,…]
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
+oj::paths
+
+profile="${OPENJAWZ_PROFILE:-}"; skip=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) export OPENJAWZ_YES=1 ;;
+    --profile) profile="$2"; shift ;;
+    --skip) skip="$2"; shift ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) oj::die "install: unknown flag $1" ;;
+  esac; shift
+done
+skipped() { case ",$skip," in *",$1,"*) return 0 ;; esac; return 1; }
+
+detect_profile() {
+  [ "$(uname -m)" = aarch64 ] && { echo deck; return; }
+  compgen -G "/proc/acpi/button/lid/*" >/dev/null && { echo laptop; return; }
+  compgen -G "/dev/dri/card*" >/dev/null && { echo desktop; return; }
+  echo vm
+}
+[ -n "$profile" ] || profile="$(detect_profile)"
+case "$profile" in desktop|laptop|deck|vm) ;; *) oj::die "install: unknown profile $profile" ;; esac
+export OPENJAWZ_PROFILE="$profile"
+mkdir -p "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_HOME" "$OPENJAWZ_DATA" "$OPENJAWZ_RUN"
+oj::log info "openjawz install $(oj::version) — profile=$profile yes=${OPENJAWZ_YES:-0}"
+
+# ── stages ───────────────────────────────────────────────────────────────────
+st_preflight() {
+  oj::is_root && { echo "run as your user, not root"; return 1; }
+  oj::is_arch || { echo "not an Arch-based system"; return 1; }
+  oj::have synaps || { echo "synaps not on PATH (install synaps-bin)"; return 1; }
+  systemctl --user --version >/dev/null 2>&1 || { echo "no systemd user session"; return 1; }
+}
+
+st_config() {
+  local cfg="$SYNAPS_BASE_DIR/config" mcp="$SYNAPS_BASE_DIR/mcp.json"
+  mkdir -p "$SYNAPS_BASE_DIR"; chmod 700 "$SYNAPS_BASE_DIR"
+  if [ ! -e "$cfg" ]; then
+    # fill placeholders with defaults; onboard rewrites identity/agent_name later
+    local an="${AGENT_NAME:-Agent}" model="${MODEL:-}" ident="${IDENTITY:-}"
+    sed -e "s|{{AGENT_NAME}}|$an|" \
+        -e "s|^identity = {{IDENTITY}}|${ident:+identity = $ident}${ident:-# identity = (set by openjawz onboard)}|" \
+        -e "s|^model = {{MODEL}}|${model:+model = $model}${model:-# model = (runtime default; set provider/model here)}|" \
+        "$OPENJAWZ_SHARE/daemon/config.default" > "$cfg"
+    chmod 600 "$cfg"; echo "wrote $cfg"
+  else
+    echo "kept existing $cfg"
+  fi
+  if grep -Eq '^\s*progressive_tool_disclosure\s*=' "$cfg"; then
+    sed -i -E 's/^\s*progressive_tool_disclosure\s*=.*/progressive_tool_disclosure = true/' "$cfg"
+  else
+    printf '\nprogressive_tool_disclosure = true\n' >> "$cfg"
+  fi
+  if [ ! -e "$mcp" ]; then
+    if oj::have axel; then cp "$OPENJAWZ_SHARE/daemon/mcp.json.default" "$mcp"
+    else printf '{ "mcpServers": {} }\n' > "$mcp"; echo "axel absent: mcp.json has no servers (openjawz brain init adds it later)"; fi
+    chmod 600 "$mcp"
+  fi
+}
+
+st_profile() {
+  local dst="$OPENJAWZ_CONFIG/profile.env"
+  if [ -e "$dst" ] && grep -q "^OPENJAWZ_PROFILE=$profile$" "$dst"; then echo "profile.env already $profile"; return 0; fi
+  install -m644 "$OPENJAWZ_SHARE/daemon/profiles/$profile.env" "$dst"; echo "profile.env ← $profile"
+}
+
+st_unit() {
+  [ -r "$OPENJAWZ_CONFIG/profile.env" ] && oj::_load_env "$OPENJAWZ_CONFIG/profile.env"
+  if [ "${OPENJAWZ_DAEMON:-local}" = remote ]; then echo "deck profile: daemon is remote"; return 2; fi
+  systemctl --user daemon-reload
+  oj::run systemctl --user enable --now synaps-daemon.service
+  for _ in $(seq 1 20); do oj::daemon_alive && break; sleep 0.5; done
+  oj::daemon_alive || { echo "daemon not answering: journalctl --user -u synaps-daemon.service"; return 1; }
+  if [ "${OPENJAWZ_LINGER:-0}" = 1 ]; then
+    loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q yes || oj::run loginctl enable-linger "$USER" || echo "enable-linger failed (needs polkit or sudo loginctl enable-linger $USER)"
+  fi
+  echo "synaps-daemon.service active"
+}
+
+st_plugins() {
+  local d="$OPENJAWZ_SHARE/plugins" p n
+  [ -d "$d" ] || { echo "no plugins shipped"; return 2; }
+  mkdir -p "$SYNAPS_BASE_DIR/plugins"; n=0
+  for p in "$d"/*/; do
+    [ -d "$p" ] || continue
+    ln -sfn "${p%/}" "$SYNAPS_BASE_DIR/plugins/$(basename "$p")"; n=$((n+1))
+  done
+  echo "$n plugin symlink(s)"
+}
+
+st_migrate() { openjawz migrate --seed-all; }
+
+# cross-package verbs through the router: 0 ok · 2 skip · 127 not installed
+via() { openjawz "$@"; }
+
+# ── run ──────────────────────────────────────────────────────────────────────
+run_stage() { # name fn…
+  local name="$1"; shift
+  if skipped "$name"; then printf '[%s] skip (--skip)\n' "$name"; return 0; fi
+  oj::stage "$name" "$@"
+}
+run_stage preflight st_preflight
+run_stage config    st_config
+run_stage profile   st_profile
+run_stage unit      st_unit
+run_stage plugins   st_plugins
+run_stage crew      via crew install
+run_stage brain     via brain init
+run_stage onboard   via onboard ${OPENJAWZ_YES:+--yes}
+run_stage hooks     via hooks enable
+run_stage ambient   via ambient ensure
+run_stage ui        via ui install
+run_stage migrate   st_migrate
+echo
+openjawz doctor --brief || true
+echo
+echo "Attach:  synaps --attach --new      Uninstall:  openjawz uninstall"

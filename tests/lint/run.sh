@@ -20,7 +20,7 @@ while IFS= read -r f; do
     '#!'*bash*) bash_files+=("$f") ;;
     '#!'*python*) py_files+=("$f") ;;
   esac
-done < <(git ls-files)
+done < <(git ls-files -co --exclude-standard)
 
 for f in "${bash_files[@]}"; do
   n=$((n+1))

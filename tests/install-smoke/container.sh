@@ -20,12 +20,9 @@ docker exec "$name" bash -euo pipefail -c '
   for _ in $(seq 30); do systemctl is-active user@1000.service >/dev/null 2>&1 && break; sleep 1; done
   [ -n "${OPENJAWZ_OSRELEASE:-}" ] && printf "%s\n" "$OPENJAWZ_OSRELEASE" > /etc/os-release
   mkdir -p /repo && chown tester /repo
-  cp -a /work/src /tmp/src && chown -R tester /tmp/src
-  cd /tmp/src && git init -q . && git add -A >/dev/null && git -c user.name=t -c user.email=t@t commit -qm src
-  chown -R tester /tmp/src
+  rm -rf /tmp/src; cp -a /work/src /tmp/src && chown -R tester /tmp/src
   st=$(ls /work/dist/synaps-*.tar.gz 2>/dev/null | head -1); ax=$(ls /work/dist/axel-*.tar.gz 2>/dev/null | head -1)
   runuser -u tester -- env HOME=/home/tester ${st:+SYNAPS_TARBALL=$st} ${ax:+AXEL_TARBALL=$ax} \
     /tmp/src/packages/build-repo.sh --no-sign --out /repo --src /tmp/src 2>&1 | tail -15
-  pacman -Q synaps-bin >/dev/null 2>&1 && true
   echo "container ready"
 '

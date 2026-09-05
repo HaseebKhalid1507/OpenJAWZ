@@ -6,7 +6,7 @@
 # Output: DIR/{*.pkg.tar.zst[.sig], openjawz.db, openjawz.db.tar.zst, openjawz.files, …} with real files (no symlinks)
 # so it can be uploaded to a GitHub Release as-is.
 set -euo pipefail
-root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/build/repo"; key=""; sign=1; throwaway=0; src=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -41,7 +41,8 @@ if [ "$throwaway" = 1 ]; then
 fi
 [ "$sign" = 1 ] && [ -z "$key" ] && { echo "no --key given; building unsigned (--no-sign to silence)" >&2; sign=0; }
 mk=(makepkg -f --noconfirm --syncdeps); [ "$sign" = 1 ] && mk+=(--sign --key "$key")
-export PKGDEST="$out"
+export PKGDEST="$out" BUILDDIR="$work/build"
+mkdir -p "$BUILDDIR"
 
 build() { # dir env…
   local d="$1"; shift

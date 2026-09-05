@@ -1,0 +1,30 @@
+{
+  "name": "synaps-tasks",
+  "version": "0.1.0",
+  "description": "Native task management tools with pinned context injection, focus tracking, smart suggestions, and session goals.",
+  "author": "OpenJAWZ contributors",
+  "extension": {
+    "runtime": "process",
+    "command": "python3",
+    "args": [
+      "main.py"
+    ],
+    "permissions": [
+      "tools.register",
+      "privacy.llm_content",
+      "session.lifecycle"
+    ],
+    "hooks": [
+      {
+        "hook": "before_message"
+      },
+      {
+        "hook": "on_session_start"
+      },
+      {
+        "hook": "on_session_end"
+      }
+    ]
+  },
+  "license": "MIT"
+}

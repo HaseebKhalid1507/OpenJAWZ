@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# openjawz-crew: install | refresh | list the crew role files into ~/.synaps-cli/agents/
+# usage: openjawz crew install|refresh|list [--force]
+# owner: openjawz-crew
+# ci: fast
+#
+# install: copy each crew/roles/<role>.md → ~/.synaps-cli/agents/<role>.md where absent, {{MODEL}} from identity.env.
+# refresh: overwrite only files that are byte-identical to the previously installed render (user edits are kept).
+set -euo pipefail
+export OJ_CMD=crew
+# shellcheck source=../ops/lib/source-lib.sh
+. "$(dirname "$(readlink -f "$0")")/../ops/lib/source-lib.sh"
+
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; }
+cmd=${1:-}; shift || true
+FORCE=0; for a in "$@"; do case $a in --force) FORCE=1;; -h|--help) usage; exit 0;; *) usage; exit 2;; esac; done
+[ -n "$cmd" ] || { usage; exit 2; }
+case $cmd in -h|--help) usage; exit 0;; esac
+
+ROLES="${OPENJAWZ_CREW:-$OPENJAWZ_SHARE/crew}/roles"
+[ -d "$ROLES" ] || ROLES="$(dirname "$(readlink -f "$0")")/../crew/roles"
+[ -d "$ROLES" ] || oj::die "crew roles not found"
+AGENTS="$SYNAPS_BASE_DIR/agents"
+STAMPS="$OPENJAWZ_STATE/crew"
+: "${MODEL:=anthropic/claude-sonnet-latest}"; export MODEL
+mkdir -p "$AGENTS" "$STAMPS"
+
+render_role() { # render_role SRC DST
+  local content; content=$(<"$1"); content=${content//"{{MODEL}}"/$MODEL}
+  printf '%s\n' "$content" > "$2"
+}
+
+case $cmd in
+  list)
+    for f in "$ROLES"/*.md; do
+      r=$(basename "$f" .md)
+      if [ -e "$AGENTS/$r.md" ]; then s=installed; else s=missing; fi
+      printf '%-16s %-9s %s\n' "$r" "$s" "$(sed -n 's/^description: //p' "$f" | head -1)"
+    done;;
+  install|refresh)
+    n_new=0 n_upd=0 n_kept=0
+    for f in "$ROLES"/*.md; do
+      r=$(basename "$f" .md); dst="$AGENTS/$r.md"; stamp="$STAMPS/$r.md"
+      tmp=$(mktemp); render_role "$f" "$tmp"
+      if [ ! -e "$dst" ]; then
+        install -m 0644 "$tmp" "$dst"; cp "$tmp" "$stamp"; n_new=$((n_new+1))
+      elif [ $FORCE = 1 ] || { [ "$cmd" = refresh ] && [ -e "$stamp" ] && cmp -s "$dst" "$stamp"; }; then
+        if ! cmp -s "$tmp" "$dst"; then install -m 0644 "$tmp" "$dst"; cp "$tmp" "$stamp"; n_upd=$((n_upd+1)); else n_kept=$((n_kept+1)); fi
+      else
+        n_kept=$((n_kept+1))
+      fi
+      rm -f "$tmp"
+    done
+    oj::log ok "crew $cmd: $n_new new, $n_upd updated, $n_kept kept → $AGENTS (model: $MODEL)";;
+  *) usage; exit 2;;
+esac

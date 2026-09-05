@@ -1,0 +1,31 @@
+{
+  "name": "axel",
+  "version": "0.1.0",
+  "description": "The brain \u2014 ambient search, memory, recall. One .r8 per user; the daemon is the single writer.",
+  "author": "OpenJAWZ contributors",
+  "license": "MIT",
+  "extension": {
+    "runtime": "process",
+    "command": "axel",
+    "args": [
+      "extension"
+    ],
+    "shared": true,
+    "permissions": [
+      "privacy.llm_content",
+      "session.lifecycle",
+      "tools.register"
+    ],
+    "hooks": [
+      {
+        "hook": "before_message"
+      },
+      {
+        "hook": "on_session_start"
+      },
+      {
+        "hook": "on_session_end"
+      }
+    ]
+  }
+}

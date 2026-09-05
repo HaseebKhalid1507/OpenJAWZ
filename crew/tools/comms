@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+# openjawz-comms: inter-agent message board (SQLite) for parallel playbooks
+# usage: openjawz comms post|read|unread|channels|archive ...
+# owner: openjawz-crew
+# ci: fast
+"""
+comms — Inter-agent communication board
+SQLite-backed message system for parallel agent coordination.
+"""
+
+import argparse
+import sqlite3
+import os
+import sys
+import json
+from datetime import datetime, timedelta
+
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+import openjawz_track
+openjawz_track.init()
+
+DB_PATH = str(openjawz_paths.data() / "comms.db")
+
+
+def get_db():
+    """Get database connection, create tables if needed."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT NOT NULL,
+            from_agent TEXT NOT NULL,
+            to_agent TEXT DEFAULT 'all',
+            message TEXT NOT NULL,
+            msg_type TEXT DEFAULT 'finding',
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS reads (
+            message_id INTEGER NOT NULL,
+            agent TEXT NOT NULL,
+            read_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (message_id, agent),
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS archive (
+            id INTEGER PRIMARY KEY,
+            channel TEXT NOT NULL,
+            from_agent TEXT NOT NULL,
+            to_agent TEXT DEFAULT 'all',
+            message TEXT NOT NULL,
+            msg_type TEXT DEFAULT 'finding',
+            timestamp DATETIME,
+            archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_channel ON messages(channel, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_to_agent ON messages(to_agent);
+        CREATE INDEX IF NOT EXISTS idx_archive_channel ON archive(channel);
+    """)
+    return db
+
+
+def cmd_post(args):
+    """Post a message to a channel."""
+    db = get_db()
+    db.execute(
+        "INSERT INTO messages (channel, from_agent, to_agent, message, msg_type) VALUES (?, ?, ?, ?, ?)",
+        (args.channel, args.agent, args.to or "all", args.message, args.type or "finding")
+    )
+    db.commit()
+    db.close()
+    print(f"✅ [{args.agent} → {args.to or 'all'}] posted to #{args.channel}")
+
+
+def cmd_read(args):
+    """Read messages from a channel."""
+    db = get_db()
+
+    query = "SELECT * FROM messages WHERE channel = ?"
+    params = [args.channel]
+
+    if args.exclude:
+        query += " AND from_agent != ?"
+        params.append(args.exclude)
+
+    # Filter by recipient — show messages to 'all' or to this specific agent
+    if args.as_agent:
+        query += " AND (to_agent = 'all' OR to_agent = ?)"
+        params.append(args.as_agent)
+
+    if args.since:
+        try:
+            mins = int(args.since.replace("m", "").replace("min", "").strip())
+            since_time = (datetime.now() - timedelta(minutes=mins)).strftime("%Y-%m-%d %H:%M:%S")
+            query += " AND timestamp > ?"
+            params.append(since_time)
+        except ValueError:
+            query += " AND timestamp > ?"
+            params.append(args.since)
+
+    query += " ORDER BY timestamp ASC"
+    rows = db.execute(query, params).fetchall()
+
+    if not rows:
+        print(f"📭 No messages in #{args.channel}")
+        db.close()
+        return
+
+    for row in rows:
+        to_label = f" → {row['to_agent']}" if row['to_agent'] != 'all' else ""
+        type_icon = {"finding": "🔍", "question": "❓", "answer": "💬", "alert": "🚨"}.get(row['msg_type'], "📝")
+        print(f"{type_icon} [{row['from_agent']}{to_label}] ({row['timestamp']}) [{row['msg_type']}]")
+        print(f"   {row['message']}")
+        print()
+
+    # Mark as read if --as specified
+    if args.as_agent:
+        for row in rows:
+            db.execute(
+                "INSERT OR IGNORE INTO reads (message_id, agent) VALUES (?, ?)",
+                (row['id'], args.as_agent)
+            )
+        db.commit()
+
+    db.close()
+
+
+def cmd_unread(args):
+    """Show only unread messages for an agent."""
+    db = get_db()
+
+    query = """
+        SELECT m.* FROM messages m
+        LEFT JOIN reads r ON r.message_id = m.id AND r.agent = ?
+        WHERE m.channel = ? AND r.read_at IS NULL
+        AND (m.to_agent = 'all' OR m.to_agent = ?)
+        AND m.from_agent != ?
+        ORDER BY m.timestamp ASC
+    """
+    rows = db.execute(query, (args.as_agent, args.channel, args.as_agent, args.as_agent)).fetchall()
+
+    if not rows:
+        print(f"✅ No unread messages for {args.as_agent} in #{args.channel}")
+        db.close()
+        return
+
+    print(f"📬 {len(rows)} unread for {args.as_agent} in #{args.channel}:\n")
+    for row in rows:
+        to_label = f" → {row['to_agent']}" if row['to_agent'] != 'all' else ""
+        type_icon = {"finding": "🔍", "question": "❓", "answer": "💬", "alert": "🚨"}.get(row['msg_type'], "📝")
+        print(f"{type_icon} [{row['from_agent']}{to_label}] ({row['timestamp']}) [{row['msg_type']}]")
+        print(f"   {row['message']}")
+        print()
+
+    # Mark them as read
+    for row in rows:
+        db.execute(
+            "INSERT OR IGNORE INTO reads (message_id, agent) VALUES (?, ?)",
+            (row['id'], args.as_agent)
+        )
+    db.commit()
+    db.close()
+
+
+def cmd_archive(args):
+    """Archive a channel's messages."""
+    db = get_db()
+
+    # Move messages to archive
+    count = db.execute(
+        "INSERT INTO archive (id, channel, from_agent, to_agent, message, msg_type, timestamp) "
+        "SELECT id, channel, from_agent, to_agent, message, msg_type, timestamp FROM messages WHERE channel = ?",
+        (args.channel,)
+    ).rowcount
+
+    # Clean up reads for archived messages
+    db.execute(
+        "DELETE FROM reads WHERE message_id IN (SELECT id FROM messages WHERE channel = ?)",
+        (args.channel,)
+    )
+
+    # Remove from active
+    db.execute("DELETE FROM messages WHERE channel = ?", (args.channel,))
+    db.commit()
+    db.close()
+
+    print(f"📦 Archived {count} messages from #{args.channel}")
+
+
+def cmd_history(args):
+    """Read archived messages from a channel."""
+    db = get_db()
+
+    rows = db.execute(
+        "SELECT * FROM archive WHERE channel = ? ORDER BY timestamp ASC",
+        (args.channel,)
+    ).fetchall()
+
+    if not rows:
+        print(f"📭 No archived messages for #{args.channel}")
+        db.close()
+        return
+
+    print(f"📜 Archive for #{args.channel} ({len(rows)} messages):\n")
+    for row in rows:
+        to_label = f" → {row['to_agent']}" if row['to_agent'] != 'all' else ""
+        type_icon = {"finding": "🔍", "question": "❓", "answer": "💬", "alert": "🚨"}.get(row['msg_type'], "📝")
+        print(f"{type_icon} [{row['from_agent']}{to_label}] ({row['timestamp']}) [{row['msg_type']}]")
+        print(f"   {row['message']}")
+        print()
+
+    db.close()
+
+
+def cmd_channels(args):
+    """List active channels."""
+    db = get_db()
+
+    rows = db.execute("""
+        SELECT channel, COUNT(*) as msg_count,
+               COUNT(DISTINCT from_agent) as agents,
+               MIN(timestamp) as started,
+               MAX(timestamp) as latest
+        FROM messages GROUP BY channel ORDER BY latest DESC
+    """).fetchall()
+
+    if not rows:
+        print("📭 No active channels")
+        db.close()
+        return
+
+    print("📡 Active channels:\n")
+    for row in rows:
+        print(f"  #{row['channel']}  {row['msg_count']} msgs, {row['agents']} agents  ({row['started']} → {row['latest']})")
+
+    db.close()
+
+
+def cmd_stats(args):
+    """Show comms system stats."""
+    db = get_db()
+
+    active = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    archived = db.execute("SELECT COUNT(*) FROM archive").fetchone()[0]
+    channels = db.execute("SELECT COUNT(DISTINCT channel) FROM messages").fetchone()[0]
+    reads = db.execute("SELECT COUNT(*) FROM reads").fetchone()[0]
+
+    print(f"📊 Comms Stats")
+    print(f"   Active messages:  {active}")
+    print(f"   Archived:         {archived}")
+    print(f"   Active channels:  {channels}")
+    print(f"   Read receipts:    {reads}")
+
+    db.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="inter-agent comms")
+    sub = parser.add_subparsers(dest="command")
+
+    # post
+    p_post = sub.add_parser("post", help="Post a message")
+    p_post.add_argument("channel", help="Channel name")
+    p_post.add_argument("agent", help="Sending agent name")
+    p_post.add_argument("message", help="Message content")
+    p_post.add_argument("--to", help="Recipient agent (default: all)")
+    p_post.add_argument("--type", choices=["finding", "question", "answer", "alert"], default="finding")
+
+    # read
+    p_read = sub.add_parser("read", help="Read channel messages")
+    p_read.add_argument("channel", help="Channel name")
+    p_read.add_argument("--as", dest="as_agent", help="Reading as this agent (marks read)")
+    p_read.add_argument("--exclude", help="Exclude messages from this agent")
+    p_read.add_argument("--since", help="Messages since (e.g. '5m' or timestamp)")
+
+    # unread
+    p_unread = sub.add_parser("unread", help="Show unread messages for an agent")
+    p_unread.add_argument("channel", help="Channel name")
+    p_unread.add_argument("--as", dest="as_agent", required=True, help="Agent to check unread for")
+
+    # archive
+    p_archive = sub.add_parser("archive", help="Archive a channel")
+    p_archive.add_argument("channel", help="Channel to archive")
+
+    # history
+    p_history = sub.add_parser("history", help="Read archived channel")
+    p_history.add_argument("channel", help="Channel name")
+
+    # channels
+    sub.add_parser("channels", help="List active channels")
+
+    # stats
+    sub.add_parser("stats", help="System stats")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        return
+
+    {
+        "post": cmd_post,
+        "read": cmd_read,
+        "unread": cmd_unread,
+        "archive": cmd_archive,
+        "history": cmd_history,
+        "channels": cmd_channels,
+        "stats": cmd_stats,
+    }[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

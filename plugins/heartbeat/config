@@ -1,0 +1,5 @@
+enabled            = true
+idle_threshold_sec = 284    # 4:44 — the cadence. (under the 300s/5m cache TTL)
+beat_interval_sec  = 284
+max_beats          = 12
+check_interval_sec = 5      # tight poll so the 284s beat fires BEFORE the 300s TTL cliff

@@ -1,0 +1,393 @@
+#!/usr/bin/env python3
+# openjawz-transcript: read the dialogue out of a session store (no tool calls, no thinking)
+# usage: openjawz transcript list|show|dump|search|stats [--raw] ...
+# owner: openjawz-ops
+# ci: fast
+"""
+transcript — read the dialogue out of any agent session store.
+
+Strips tool calls, tool results, and thinking blocks. Prints only what the
+human said and what the agent said back.
+
+Stores:
+  synaps  ~/.synaps-cli/sessions/*.json          (api_messages)
+"""
+
+from __future__ import annotations
+
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+import openjawz_track
+openjawz_track.init()
+
+import argparse
+import datetime as dt
+import glob
+import json
+import os
+import re
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+VERSION = "1.0.0"
+AGENT = openjawz_paths.agent_name().upper()[:4].ljust(4)
+
+HOME = Path.home()
+STORES = {
+    "synaps": Path(os.environ.get("SYNAPS_BASE_DIR", HOME / ".synaps-cli")) / "sessions",
+}
+LOCAL_OFFSET = dt.datetime.now().astimezone().utcoffset() or dt.timedelta(0)  # stores are UTC
+
+# ---------------------------------------------------------------- colour ----
+_NC = bool(os.environ.get("NO_COLOR")) or not sys.stdout.isatty()
+
+
+def c(code: str, s: str) -> str:
+    return s if _NC else f"\033[{code}m{s}\033[0m"
+
+
+DIM = lambda s: c("2", s)
+BOLD = lambda s: c("1", s)
+CYAN = lambda s: c("36", s)
+MAG = lambda s: c("35", s)
+YEL = lambda s: c("33", s)
+GRN = lambda s: c("32", s)
+RED = lambda s: c("31", s)
+
+# --------------------------------------------------------------- filters ----
+# System-injected strings that look like human turns but aren't.
+NOISE = re.compile(
+    r"^(<local-command-stdout>|<command-name>|<command-message>|"
+    r"\[Request interrupted|Caveat: The messages below|"
+    r"This session is being continued from|<system-reminder>|"
+    r"The conversation history before this point was compacted|"
+    r"Your task is to create a detailed summary|"
+    r"\[Continuing from previous session)",
+    re.I,
+)
+
+
+@dataclass
+class Turn:
+    ts: dt.datetime | None
+    role: str  # "human" | "agent"
+    text: str
+
+
+@dataclass
+class Session:
+    path: Path
+    store: str
+    sid: str
+    created: dt.datetime | None
+    title: str = ""
+    model: str = ""
+    cost: float = 0.0
+    nmsg: int = 0
+    turns: list[Turn] = field(default_factory=list)
+
+    @property
+    def date(self) -> str:
+        return self.created.strftime("%Y-%m-%d %H:%M") if self.created else "?"
+
+
+# ----------------------------------------------------------------- utils ----
+def parse_ts(s):
+    if not s:
+        return None
+    try:
+        t = dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return (t + LOCAL_OFFSET).replace(tzinfo=None) if t.tzinfo else t
+    except Exception:
+        return None
+
+
+def blocks_to_text(content) -> str:
+    """Pull only 'text' out of a content field. Drop thinking/tool_*."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        out = []
+        for b in content:
+            if isinstance(b, str):
+                out.append(b)
+            elif isinstance(b, dict) and b.get("type") == "text":
+                out.append(b.get("text", ""))
+        return "\n".join(x for x in out if x).strip()
+    return ""
+
+
+def add_turn(sess: Session, ts, role, text, keep_noise: bool):
+    text = (text or "").strip()
+    if not text:
+        return
+    if not keep_noise and NOISE.match(text):
+        return
+    sess.turns.append(Turn(ts, role, text))
+
+
+# --------------------------------------------------------------- loaders ----
+def load_synaps(p: Path, keep_noise=False, meta_only=False) -> Session | None:
+    try:
+        d = json.loads(p.read_text(errors="replace"))
+    except Exception:
+        return None
+    created = parse_ts(d.get("created_at"))
+    s = Session(p, "synaps", p.stem, created, (d.get("title") or "").strip(),
+                d.get("model", ""), float(d.get("session_cost") or 0),
+                len(d.get("api_messages") or []))
+    if meta_only:
+        return s
+    for m in d.get("api_messages") or []:
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        add_turn(s, None, "human" if role == "user" else "agent",
+                 blocks_to_text(m.get("content")), keep_noise)
+    return s
+
+
+def _iter_jsonl(p: Path):
+    try:
+        with p.open(errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except Exception:
+                    continue
+    except Exception:
+        return
+
+
+LOADERS = {"synaps": load_synaps}
+
+
+def discover(stores) -> list[tuple[str, Path]]:
+    out = []
+    for name in stores:
+        root = STORES[name]
+        if not root.exists():
+            continue
+        pat = "*.json" if name == "synaps" else "**/*.jsonl"
+        for f in root.glob(pat):
+            if f.name.endswith(".bak") or not f.is_file():
+                continue
+            out.append((name, f))
+    return out
+
+
+def collect(args, meta_only=True) -> list[Session]:
+    since = dt.datetime.strptime(args.since, "%Y-%m-%d") if args.since else None
+    until = (dt.datetime.strptime(args.until, "%Y-%m-%d") + dt.timedelta(days=1)) if args.until else None
+    keep = getattr(args, "raw", False)
+    sessions = []
+    for store, path in discover(args.store):
+        s = LOADERS[store](path, keep_noise=keep, meta_only=meta_only)
+        if not s or not s.nmsg:
+            continue
+        if since and (not s.created or s.created < since):
+            continue
+        if until and (not s.created or s.created >= until):
+            continue
+        sessions.append(s)
+    sessions.sort(key=lambda x: (x.created or dt.datetime.min))
+    return sessions
+
+
+# --------------------------------------------------------------- printing ---
+def print_dialogue(s: Session, args, fh=sys.stdout):
+    head = f"━━━ {s.date} · {s.store} · {s.sid}"
+    if s.cost:
+        head += f" · ${s.cost:,.2f}"
+    if s.title:
+        head += f" · {s.title[:50]}"
+    print("\n" + BOLD(head), file=fh)
+    for t in s.turns:
+        if args.only == "me" and t.role != "human":
+            continue
+        if args.only == "agent" and t.role != "agent":
+            continue
+        txt = t.text
+        if args.max_len and len(txt) > args.max_len:
+            txt = txt[: args.max_len] + DIM(" …")
+        stamp = t.ts.strftime("%H:%M") if t.ts else "  ·  "
+        if t.role == "human":
+            print(f"{DIM(stamp)} {CYAN('YOU ')}  {txt}", file=fh)
+        else:
+            body = txt.replace("\n", "\n         ")
+            print(f"{DIM(stamp)} {MAG(AGENT)}  {body}", file=fh)
+
+
+def cmd_list(args):
+    ss = collect(args, meta_only=True)
+    if args.json:
+        print(json.dumps([dict(date=s.date, store=s.store, id=s.sid, msgs=s.nmsg,
+                               cost=round(s.cost, 2), title=s.title,
+                               path=str(s.path)) for s in ss], indent=2))
+        return 0
+    if args.sort == "cost":
+        ss.sort(key=lambda x: -x.cost)
+    elif args.sort == "msgs":
+        ss.sort(key=lambda x: -x.nmsg)
+    if args.limit:
+        ss = ss[: args.limit]
+    print(BOLD(f"{'date':<17}{'store':<8}{'id':<10}{'msgs':>6}{'cost':>10}  title"))
+    tot = 0.0
+    for s in ss:
+        tot += s.cost
+        cost = f"${s.cost:,.2f}" if s.cost else "—"
+        print(f"{s.date:<17}{s.store:<8}{s.sid[:9]:<10}{s.nmsg:>6}{cost:>10}  {DIM(s.title[:44])}")
+    print(DIM(f"\n{len(ss)} sessions · ${tot:,.2f} total"))
+    return 0
+
+
+def cmd_show(args):
+    matches = [(st, p) for st, p in discover(args.store) if args.ref in p.name]
+    if not matches:
+        print(RED(f"no session matching '{args.ref}'"), file=sys.stderr)
+        return 1
+    for st, p in matches[: args.limit or len(matches)]:
+        s = LOADERS[st](p, keep_noise=args.raw, meta_only=False)
+        if s:
+            print_dialogue(s, args)
+    return 0
+
+
+def cmd_dump(args):
+    ss = collect(args, meta_only=False)
+    if args.limit:
+        ss = ss[: args.limit]
+    fh = open(args.out, "w") if args.out else sys.stdout
+    global _NC
+    if args.out:
+        _NC = True
+    try:
+        for s in ss:
+            print_dialogue(s, args, fh=fh)
+        n = sum(len(s.turns) for s in ss)
+        msg = f"\n{len(ss)} sessions · {n} turns"
+        print(DIM(msg), file=sys.stderr if args.out else fh)
+        if args.out:
+            print(GRN(f"written: {args.out}"), file=sys.stderr)
+    finally:
+        if args.out:
+            fh.close()
+    return 0
+
+
+def cmd_search(args):
+    pat = re.compile(args.query, re.I if not args.case else 0)
+    ss = collect(args, meta_only=False)
+    hits = 0
+    for s in ss:
+        found = [t for t in s.turns if pat.search(t.text)
+                 and (args.only == "any"
+                      or (args.only == "me" and t.role == "human")
+                      or (args.only == "agent" and t.role == "agent"))]
+        if not found:
+            continue
+        print("\n" + BOLD(f"━━━ {s.date} · {s.store} · {s.sid} · {s.title[:40]}"))
+        for t in found[: args.per_session]:
+            txt = t.text
+            if args.max_len and len(txt) > args.max_len:
+                txt = txt[: args.max_len] + " …"
+            who = CYAN("YOU ") if t.role == "human" else MAG(AGENT)
+            stamp = t.ts.strftime("%H:%M") if t.ts else "  ·  "
+            print(f"{DIM(stamp)} {who}  {txt}")
+            hits += 1
+    print(DIM(f"\n{hits} matches"))
+    return 0
+
+
+def cmd_stats(args):
+    ss = collect(args, meta_only=True)
+    if not ss:
+        print("no sessions"); return 0
+    by_store, by_day = {}, {}
+    tot = 0.0
+    for s in ss:
+        st = by_store.setdefault(s.store, [0, 0, 0.0])
+        st[0] += 1; st[1] += s.nmsg; st[2] += s.cost
+        tot += s.cost
+        if s.created:
+            d = by_day.setdefault(s.created.strftime("%Y-%m-%d"), [0, 0.0])
+            d[0] += 1; d[1] += s.cost
+    print(BOLD("by store"))
+    for k, (n, m, cst) in sorted(by_store.items()):
+        print(f"  {k:<8}{n:>6} sessions {m:>8} msgs  ${cst:>12,.2f}")
+    print(BOLD("\ntop 10 days by spend"))
+    for d, (n, cst) in sorted(by_day.items(), key=lambda x: -x[1][1])[:10]:
+        print(f"  {d}  {n:>3} sessions  ${cst:>10,.2f}")
+    print(DIM(f"\n{len(ss)} sessions · ${tot:,.2f} total"))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="transcript",
+        description="Print just the human turns and agent replies from any session store.")
+    ap.add_argument("--version", action="version", version=f"transcript {VERSION}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def common(p, with_only=True):
+        p.add_argument("--store", nargs="+", choices=list(STORES), default=list(STORES))
+        p.add_argument("--since", help="YYYY-MM-DD")
+        p.add_argument("--until", help="YYYY-MM-DD")
+        p.add_argument("--limit", type=int, default=0)
+        p.add_argument("--raw", action="store_true", help="keep system-injected noise")
+        p.add_argument("--max-len", type=int, default=0, help="truncate each turn")
+        if with_only:
+            p.add_argument("--only", choices=["any", "me", "agent"], default="any")
+
+    p = sub.add_parser("list", help="list sessions")
+    common(p, with_only=False)
+    p.add_argument("--sort", choices=["date", "cost", "msgs"], default="date")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_list, only="any")
+
+    p = sub.add_parser("show", help="print one session's dialogue")
+    p.add_argument("ref", help="filename substring / session id")
+    common(p)
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("dump", help="print many sessions' dialogue")
+    common(p)
+    p.add_argument("--out", help="write to file instead of stdout")
+    p.set_defaults(func=cmd_dump)
+
+    p = sub.add_parser("search", help="grep the dialogue")
+    p.add_argument("query")
+    common(p)
+    p.add_argument("--case", action="store_true", help="case-sensitive")
+    p.add_argument("--per-session", type=int, default=5)
+    p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("stats", help="session/cost breakdown")
+    common(p, with_only=False)
+    p.set_defaults(func=cmd_stats, only="any")
+
+    args = ap.parse_args()
+    try:
+        return args.func(args)
+    except BrokenPipeError:
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        print(RED(f"error: {e}"), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

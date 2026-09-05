@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+# openjawz-sessions: session log — add, recent, list, get, search, count, last, next (rotates recent)
+# usage: openjawz sessions add --number N --date YYYY-MM-DD --summary "..." | recent [n] | list | get N | search q | count | last | next
+# owner: openjawz-ops
+# ci: fast
+"""
+sessions — Session history management. Shutdown step 2.
+
+Appends one line per session to context/full/sessions_full.md (append-only archive) and
+rebuilds context/active/sessions_recent.md (last 3, newest first). Never hand-edit those files.
+stdlib only.
+"""
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+import openjawz_track
+openjawz_track.init()
+
+import argparse
+import os
+import re
+import sys
+from datetime import datetime
+
+CONTEXT = openjawz_paths.context()
+FULL_FILE = CONTEXT / "full" / "sessions_full.md"
+RECENT_FILE = CONTEXT / "active" / "sessions_recent.md"
+
+NO_COLOR = os.environ.get("NO_COLOR") or not sys.stdout.isatty()
+
+
+def colorize(text, code):
+    return text if NO_COLOR else f"\033[{code}m{text}\033[0m"
+
+
+def green(t): return colorize(t, "32")
+def red(t): return colorize(t, "31")
+def yellow(t): return colorize(t, "33")
+
+
+def ensure_files():
+    if not FULL_FILE.exists():
+        FULL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        FULL_FILE.write_text("# Session Log\n\nOne-liner per session. What happened, what changed, what matters.\n\n---\n\n")
+    if not RECENT_FILE.exists():
+        RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RECENT_FILE.write_text("# Recent Sessions\n\n")
+
+
+LINE_RE = re.compile(r'^- \*\*(\d{4}-\d{2}-\d{2}) \((\w+)\) (S?\d+)\*\* — (.+)$')
+
+
+def parse_session_line(line):
+    m = LINE_RE.match(line.strip())
+    return m.groups() if m else None
+
+
+def get_all_sessions():
+    ensure_files()
+    sessions = []
+    with open(FULL_FILE) as f:
+        for line in f:
+            p = parse_session_line(line)
+            if p:
+                sessions.append(p)
+    return sessions
+
+
+def format_session_line(date_str, day, number, summary):
+    return f"- **{date_str} ({day}) {number}** — {summary}"
+
+
+def get_day_name(date_str):
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a")
+
+
+def norm(number):
+    return f"S{number}" if number.isdigit() else number
+
+
+def session_exists(number):
+    return any(n == number for _, _, n, _ in get_all_sessions())
+
+
+def next_number():
+    nums = [int(n.lstrip("S")) for _, _, n, _ in get_all_sessions() if n.lstrip("S").isdigit()]
+    return f"S{max(nums) + 1 if nums else 1}"
+
+
+def rebuild_recent_file(n=3):
+    sessions = get_all_sessions()[-n:]
+    sessions.reverse()
+    with open(RECENT_FILE, "w") as f:
+        f.write("# Recent Sessions\n\n")
+        for s in sessions:
+            f.write(format_session_line(*s) + "\n")
+
+
+def cmd_add(a):
+    ensure_files()
+    number = norm(a.number)
+    try:
+        datetime.strptime(a.date, "%Y-%m-%d")
+    except ValueError:
+        print(red(f"invalid date: {a.date}. Use YYYY-MM-DD")); return 1
+    if session_exists(number):
+        print(red(f"session {number} already exists")); return 1
+    day = get_day_name(a.date)
+    with open(FULL_FILE, "a") as f:
+        f.write(format_session_line(a.date, day, number, a.summary.replace("\n", " ").strip()) + "\n")
+    rebuild_recent_file()
+    print(green(f"added {number}: {a.date} ({day})"))
+    return 0
+
+
+def cmd_recent(a):
+    ensure_files()
+    lines = [l.strip() for l in RECENT_FILE.read_text().splitlines() if parse_session_line(l)]
+    for l in lines[:a.n]:
+        print(l)
+    return 0
+
+
+def cmd_list(a):
+    s = get_all_sessions()
+    if not s:
+        print(yellow("no sessions")); return 0
+    s.reverse()
+    for row in s[:a.limit] if a.limit else s:
+        print(format_session_line(*row))
+    return 0
+
+
+def cmd_get(a):
+    want = norm(a.session_number)
+    for row in get_all_sessions():
+        if row[2] == want:
+            print(format_session_line(*row)); return 0
+    print(red(f"session {want} not found")); return 1
+
+
+def cmd_search(a):
+    q = a.query.lower(); found = False
+    for row in get_all_sessions():
+        line = format_session_line(*row)
+        if q in line.lower():
+            print(line); found = True
+    if not found:
+        print(yellow(f"no sessions matching '{a.query}'"))
+    return 0
+
+
+def cmd_count(a):
+    print(len(get_all_sessions())); return 0
+
+
+def cmd_last(a):
+    s = get_all_sessions()
+    if not s:
+        print(yellow("no sessions")); return 0
+    print(format_session_line(*s[-1])); return 0
+
+
+def cmd_next(a):
+    print(next_number()); return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="openjawz sessions", description=__doc__.strip().splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd")
+    p = sub.add_parser("add", help="append a session and rotate recent")
+    p.add_argument("--number", required=True, help="session number (S86 or 86)")
+    p.add_argument("--date", required=True, help="YYYY-MM-DD")
+    p.add_argument("--summary", required=True)
+    p.set_defaults(fn=cmd_add)
+    p = sub.add_parser("recent", help="last N sessions (default 3)"); p.add_argument("n", nargs="?", type=int, default=3); p.set_defaults(fn=cmd_recent)
+    p = sub.add_parser("list", help="all sessions, newest first"); p.add_argument("--limit", type=int); p.set_defaults(fn=cmd_list)
+    p = sub.add_parser("get", help="one session"); p.add_argument("session_number"); p.set_defaults(fn=cmd_get)
+    p = sub.add_parser("search", help="case-insensitive search"); p.add_argument("query"); p.set_defaults(fn=cmd_search)
+    sub.add_parser("count", help="total").set_defaults(fn=cmd_count)
+    sub.add_parser("last", help="most recent").set_defaults(fn=cmd_last)
+    sub.add_parser("next", help="next free session number").set_defaults(fn=cmd_next)
+    a = ap.parse_args(argv)
+    if not a.cmd:
+        ap.print_help(); return 0
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

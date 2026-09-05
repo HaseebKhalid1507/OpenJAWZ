@@ -1,0 +1,10 @@
+# ops/plugins.list — Synaps plugins OpenJAWZ ships or depends on. Format: name  kind  source  state  note
+# kind: ship = in this repo under plugins/ (v0.1: manifests + stdlib code, no vendored third-party trees)
+#       dep  = declared as an optional dependency on its upstream; never vendored here
+axel          ship  plugins/axel            enabled   the brain extension; command "axel" on PATH (axel-bin)
+chronos       ship  hooks/chronos/plugin    enabled   injects the current time before every message; + hourly tick timer
+synaps-tasks  ship  plugins/synaps-tasks    enabled   native task tools; DATA_DIR from $OPENJAWZ_DATA; shares tasks.json with `openjawz tasks`
+weather-lens  ship  plugins/weather-lens    enabled   open-meteo current conditions by place name; stdlib; no key
+heartbeat     ship  plugins/heartbeat       DISABLED  keeps a prompt cache warm (beat at 284 s < 300 s TTL); costs tokens — opt in
+web-tools     dep   upstream (MIT)          optional  fetch/browser/search/youtube/scholar/pdf; needs node
+tmux-tools    dep   upstream (MIT)          optional  worker panes in tmux

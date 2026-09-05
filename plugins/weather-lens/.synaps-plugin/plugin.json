@@ -1,0 +1,21 @@
+{
+  "name": "weather-lens",
+  "version": "0.1.0",
+  "description": "Minimal weather tool — current conditions for any place by name via the free open-meteo API. Python stdlib only, no API key, no dependencies. Reference tool for the agent-skeleton catalogue.",
+  "author": "OpenJAWZ contributors",
+  "license": "MIT",
+  "category": "utility",
+  "compatibility": {
+    "synaps": ">=0.1.0"
+  },
+  "extension": {
+    "runtime": "process",
+    "command": "python3",
+    "args": [
+      "main.py"
+    ],
+    "permissions": [
+      "tools.register"
+    ]
+  }
+}

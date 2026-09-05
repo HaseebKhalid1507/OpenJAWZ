@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# openjawz-checkpoint: write context/active/checkpoint.md from stdin/args with a timestamp
+# usage: openjawz checkpoint [--append] [--clear] [text...]   (or:  ... | openjawz checkpoint)
+# owner: openjawz-ops
+# ci: fast
+#
+# The ~10-exchange rule needs a tool. Default overwrites (one checkpoint per session);
+# --append is for concurrent sessions sharing one engram (never `cat >` over someone else's state).
+set -euo pipefail
+export OJ_CMD=checkpoint
+# shellcheck source=../ops/lib/source-lib.sh
+. "$(dirname "$(readlink -f "$0")")/../ops/lib/source-lib.sh"
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; }
+MODE=overwrite; TEXT=()
+for a in "$@"; do case $a in -h|--help) usage; exit 0;; --append) MODE=append;; --clear) MODE=clear;; *) TEXT+=("$a");; esac; done
+F="$OPENJAWZ_HOME/context/active/checkpoint.md"; mkdir -p "$(dirname "$F")"
+stamp=$(date '+%Y-%m-%d %H:%M %Z')
+if [ $MODE = clear ]; then
+  printf '# Checkpoint — session completed %s. No in-flight work.\n' "$stamp" > "$F"
+  oj::log ok "checkpoint cleared"; exit 0
+fi
+if [ ${#TEXT[@]} -gt 0 ]; then body="${TEXT[*]}"; elif [ ! -t 0 ]; then body=$(cat); else oj::die "nothing to checkpoint (pass text or pipe stdin)"; fi
+[ -n "$body" ] || oj::die "empty checkpoint refused"
+if [ $MODE = append ]; then
+  printf '\n## %s\n%s\n' "$stamp" "$body" >> "$F"
+else
+  printf '# Checkpoint — %s\n\n%s\n' "$stamp" "$body" > "$F"
+fi
+oj::log ok "checkpoint $MODE → $F ($(wc -c < "$F") bytes)"

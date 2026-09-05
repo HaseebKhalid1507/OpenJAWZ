@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""
+context - Context lifecycle management for the agent engram
+Manages the active/full context split, pruning stale items and restoring archived ones.
+"""
+
+import os
+import sys
+import re
+import json
+import hashlib
+from datetime import datetime, timedelta
+from pathlib import Path
+import argparse
+
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+import openjawz_track
+openjawz_track.init()
+
+# Paths
+CONTEXT_DIR = openjawz_paths.context()
+USER_ENTRY = f"{openjawz_paths.user_name()} (User)"
+ACTIVE_DIR = CONTEXT_DIR / "active"
+FULL_DIR = CONTEXT_DIR / "full"
+PROJECTS_ACTIVE = ACTIVE_DIR / "projects_active.md"
+PROJECTS_FULL = FULL_DIR / "projects_full.md"
+PEOPLE_FILE = CONTEXT_DIR / "people.md"
+SESSIONS_RECENT = ACTIVE_DIR / "sessions_recent.md"
+SNAPSHOT_FILE = CONTEXT_DIR / "last_prune.json"
+
+def get_file_stats(filepath):
+    """Get file statistics: size, lines, estimated tokens"""
+    if not filepath.exists():
+        return {"size": 0, "lines": 0, "tokens": 0}
+    
+    try:
+        text = filepath.read_text()
+        size = len(text.encode('utf-8'))
+        lines = len(text.splitlines())
+        tokens = len(text) // 4  # ~4 chars per token
+        return {"size": size, "lines": lines, "tokens": tokens}
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+        return {"size": 0, "lines": 0, "tokens": 0}
+
+def parse_projects(content):
+    """Parse projects from markdown content, return list of projects with status"""
+    projects = []
+    current_project = None
+    
+    for line in content.split('\n'):
+        # Project header (## Project Name)
+        if line.startswith('## '):
+            if current_project:
+                projects.append(current_project)
+            
+            project_name = line[3:].strip()
+            current_project = {
+                "name": project_name,
+                "status": "UNKNOWN",
+                "content": line + '\n',
+                "line_start": len('\n'.join([p.get("content", "") for p in projects]))
+            }
+        elif current_project:
+            current_project["content"] += line + '\n'
+            
+            # Look for status indicators
+            line_upper = line.upper()
+            if any(word in line_upper for word in ["**STATUS:**", "STATUS:", "**COMPLETE**", "COMPLETE", "SHIPPED", "DONE"]):
+                if any(word in line_upper for word in ["COMPLETE", "SHIPPED", "DONE"]):
+                    current_project["status"] = "COMPLETE"
+                elif "ACTIVE" in line_upper:
+                    current_project["status"] = "ACTIVE"
+                elif "BLOCKED" in line_upper:
+                    current_project["status"] = "BLOCKED"
+    
+    if current_project:
+        projects.append(current_project)
+    
+    return projects
+
+def parse_people(content):
+    """Parse people from markdown content, return list of people"""
+    people = []
+    current_person = None
+    
+    for line in content.split('\n'):
+        # Person header (## Person Name) - exclude Gaming and Fictional sections
+        if line.startswith('## ') and not line.startswith('## Gaming') and not line.startswith('## Fictional'):
+            if current_person:
+                people.append(current_person)
+            
+            person_name = line[3:].strip()
+            current_person = {
+                "name": person_name,
+                "content": line + '\n',
+                "line_start": len('\n'.join([p.get("content", "") for p in people]))
+            }
+        elif current_person and line.startswith('## '):
+            # New section, finish current person if it's a Gaming/Fictional section
+            if line.startswith('## Gaming') or line.startswith('## Fictional'):
+                people.append(current_person)
+                current_person = None
+            # Otherwise continue adding to current person (subsections)
+        elif current_person:
+            current_person["content"] += line + '\n'
+    
+    if current_person:
+        people.append(current_person)
+    
+    return people
+
+def check_recent_references(name, sessions_content):
+    """Check if name/project is mentioned in recent sessions"""
+    # Simple text search for the name in sessions
+    return name.lower() in sessions_content.lower()
+
+def count_session_references(name, sessions_content):
+    """Count how many sessions mention this name/project"""
+    sessions = sessions_content.split('**2026-')
+    count = 0
+    for session in sessions[1:]:  # Skip first empty split
+        if name.lower() in session.lower():
+            count += 1
+    return count
+
+def save_snapshot():
+    """Save current state snapshot for diff tracking"""
+    snapshot = {
+        "timestamp": datetime.now().isoformat(),
+        "projects_active_hash": hashlib.md5(PROJECTS_ACTIVE.read_text().encode()).hexdigest() if PROJECTS_ACTIVE.exists() else None,
+        "people_hash": hashlib.md5(PEOPLE_FILE.read_text().encode()).hexdigest() if PEOPLE_FILE.exists() else None,
+    }
+    SNAPSHOT_FILE.write_text(json.dumps(snapshot, indent=2))
+
+def load_snapshot():
+    """Load last prune snapshot"""
+    if not SNAPSHOT_FILE.exists():
+        return None
+    try:
+        return json.loads(SNAPSHOT_FILE.read_text())
+    except:
+        return None
+
+def cmd_audit():
+    """Audit active context for stale/completed items"""
+    print("🔍 Context Audit\n")
+    
+    # Check if files exist
+    if not PROJECTS_ACTIVE.exists():
+        print("❌ projects_active.md not found")
+        return
+    if not PEOPLE_FILE.exists():
+        print("❌ people.md not found")
+        return
+    if not SESSIONS_RECENT.exists():
+        print("⚠️  sessions_recent.md not found - can't check references")
+        sessions_content = ""
+    else:
+        sessions_content = SESSIONS_RECENT.read_text()
+    
+    # Parse projects
+    projects_content = PROJECTS_ACTIVE.read_text()
+    projects = parse_projects(projects_content)
+    
+    print("## Projects Assessment")
+    stale_projects = []
+    complete_projects = []
+    
+    for project in projects:
+        if project["status"] == "COMPLETE":
+            complete_projects.append(project["name"])
+            print(f"✅ COMPLETE: {project['name']}")
+        elif not check_recent_references(project["name"], sessions_content):
+            ref_count = count_session_references(project["name"], sessions_content)
+            stale_projects.append(project["name"])
+            print(f"🕰️  STALE: {project['name']} (no recent mentions, {ref_count} session refs)")
+        else:
+            ref_count = count_session_references(project["name"], sessions_content)
+            print(f"✅ ACTIVE: {project['name']} ({ref_count} session refs)")
+    
+    # Parse people
+    people_content = PEOPLE_FILE.read_text()
+    people = parse_people(people_content)
+    
+    print(f"\n## People Assessment")
+    stale_people = []
+    
+    for person in people:
+        if person["name"] == USER_ENTRY:
+            print(f"✅ CORE: {person['name']} (always keep)")
+            continue
+        
+        ref_count = count_session_references(person["name"], sessions_content)
+        if ref_count == 0:
+            stale_people.append(person["name"])
+            print(f"🕰️  STALE: {person['name']} (no session mentions)")
+        elif ref_count < 2:
+            print(f"⚠️  LIGHT: {person['name']} ({ref_count} session refs)")
+        else:
+            print(f"✅ ACTIVE: {person['name']} ({ref_count} session refs)")
+    
+    # Summary
+    print(f"\n## Summary")
+    print(f"📋 Projects: {len(complete_projects)} complete, {len(stale_projects)} stale")
+    print(f"👥 People: {len(stale_people)} stale")
+    
+    if complete_projects:
+        print(f"\n🚀 Ready to archive (COMPLETE): {', '.join(complete_projects)}")
+    if stale_projects:
+        print(f"🗑️  Consider archiving (STALE): {', '.join(stale_projects)}")
+    if stale_people:
+        print(f"📚 Consider archiving (PEOPLE): {', '.join(stale_people)}")
+    
+    if not complete_projects and not stale_projects and not stale_people:
+        print("✨ All items are actively referenced - nothing to prune")
+
+def cmd_prune():
+    """Auto-move stale/completed items from active to full"""
+    print("✂️  Context Pruning\n")
+    
+    # Save snapshot before changes
+    save_snapshot()
+    
+    if not PROJECTS_ACTIVE.exists() or not PEOPLE_FILE.exists():
+        print("❌ Required files not found")
+        return
+    
+    sessions_content = SESSIONS_RECENT.read_text() if SESSIONS_RECENT.exists() else ""
+    
+    # Process projects
+    projects_content = PROJECTS_ACTIVE.read_text()
+    projects = parse_projects(projects_content)
+    
+    projects_to_move = []
+    remaining_projects = []
+    
+    for project in projects:
+        # Move completed projects or stale projects (no recent references)
+        if (project["status"] == "COMPLETE" or 
+            not check_recent_references(project["name"], sessions_content)):
+            projects_to_move.append(project)
+            print(f"📦 Moving to full: {project['name']} ({project['status']})")
+        else:
+            remaining_projects.append(project)
+    
+    # Process people
+    people_content = PEOPLE_FILE.read_text()
+    people = parse_people(people_content)
+    
+    people_to_move = []
+    remaining_people = []
+    
+    for person in people:
+        # Never move the user, move others with no recent references
+        if (person["name"] != USER_ENTRY and 
+            count_session_references(person["name"], sessions_content) == 0):
+            people_to_move.append(person)
+            print(f"📦 Moving to archive: {person['name']} (no session refs)")
+        else:
+            remaining_people.append(person)
+    
+    if not projects_to_move and not people_to_move:
+        print("✨ Nothing to prune - all items are active")
+        return
+    
+    # Update projects_active.md
+    if projects_to_move:
+        new_active_content = "# Active Projects (Summary)\n\n"
+        for project in remaining_projects:
+            new_active_content += project["content"] + "\n"
+        
+        PROJECTS_ACTIVE.write_text(new_active_content.rstrip() + "\n")
+        
+        # Append to projects_full.md
+        if PROJECTS_FULL.exists():
+            full_content = PROJECTS_FULL.read_text()
+        else:
+            full_content = "# Full Projects Archive\n\n"
+        
+        full_content += f"\n# Archived {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        for project in projects_to_move:
+            full_content += project["content"] + "\n"
+        
+        PROJECTS_FULL.write_text(full_content)
+    
+    # Update people.md (remove stale people)
+    if people_to_move:
+        new_people_content = "# People\n\n"
+        for person in remaining_people:
+            new_people_content += person["content"] + "\n"
+        
+        PEOPLE_FILE.write_text(new_people_content.rstrip() + "\n")
+    
+    print(f"\n✅ Pruning complete:")
+    print(f"   📋 {len(projects_to_move)} projects moved to full")
+    print(f"   👥 {len(people_to_move)} people archived")
+
+def cmd_restore(name):
+    """Restore item from full back to active"""
+    print(f"🔄 Restoring: {name}\n")
+    
+    if not PROJECTS_FULL.exists():
+        print("❌ projects_full.md not found")
+        return
+    
+    full_content = PROJECTS_FULL.read_text()
+    projects = parse_projects(full_content)
+    
+    # Find matching project
+    matches = [p for p in projects if name.lower() in p["name"].lower()]
+    
+    if not matches:
+        print(f"❌ No projects found matching '{name}' in full archive")
+        return
+    
+    if len(matches) > 1:
+        print(f"⚠️  Multiple matches found:")
+        for i, match in enumerate(matches):
+            print(f"   {i+1}. {match['name']}")
+        print(f"Please be more specific")
+        return
+    
+    project = matches[0]
+    print(f"✅ Found: {project['name']}")
+    
+    # Add to active
+    if PROJECTS_ACTIVE.exists():
+        active_content = PROJECTS_ACTIVE.read_text()
+    else:
+        active_content = "# Active Projects (Summary)\n\n"
+    
+    active_content += f"\n{project['content']}"
+    PROJECTS_ACTIVE.write_text(active_content)
+    
+    # Remove from full (rebuild without this project)
+    remaining_projects = [p for p in projects if p["name"] != project["name"]]
+    new_full_content = "# Full Projects Archive\n\n"
+    for p in remaining_projects:
+        new_full_content += p["content"] + "\n"
+    
+    PROJECTS_FULL.write_text(new_full_content.rstrip() + "\n")
+    
+    print(f"✅ Restored '{project['name']}' to active projects")
+
+def cmd_stats():
+    """Show context statistics"""
+    print("📊 Context Statistics\n")
+    
+    # Active files
+    projects_active_stats = get_file_stats(PROJECTS_ACTIVE)
+    sessions_stats = get_file_stats(SESSIONS_RECENT)
+    people_stats = get_file_stats(PEOPLE_FILE)
+    
+    # Full files
+    projects_full_stats = get_file_stats(PROJECTS_FULL)
+    
+    print("## File Statistics")
+    print(f"📋 projects_active.md:  {projects_active_stats['size']:5} bytes, {projects_active_stats['lines']:3} lines, ~{projects_active_stats['tokens']:3} tokens")
+    print(f"👥 people.md:          {people_stats['size']:5} bytes, {people_stats['lines']:3} lines, ~{people_stats['tokens']:3} tokens")
+    print(f"📅 sessions_recent.md: {sessions_stats['size']:5} bytes, {sessions_stats['lines']:3} lines, ~{sessions_stats['tokens']:3} tokens")
+    print(f"📚 projects_full.md:   {projects_full_stats['size']:5} bytes, {projects_full_stats['lines']:3} lines, ~{projects_full_stats['tokens']:3} tokens")
+    
+    # Active context total (boot-loaded)
+    active_total = projects_active_stats['tokens'] + sessions_stats['tokens']
+    print(f"\n🚀 Boot-loaded context: ~{active_total} tokens")
+    
+    # Count projects and people
+    if PROJECTS_ACTIVE.exists():
+        projects = parse_projects(PROJECTS_ACTIVE.read_text())
+        active_projects = len(projects)
+    else:
+        active_projects = 0
+        
+    if PROJECTS_FULL.exists():
+        full_projects = parse_projects(PROJECTS_FULL.read_text())
+        archived_projects = len(full_projects)
+    else:
+        archived_projects = 0
+    
+    if PEOPLE_FILE.exists():
+        people = parse_people(PEOPLE_FILE.read_text())
+        total_people = len(people)
+    else:
+        total_people = 0
+    
+    print(f"\n## Content Counts")
+    print(f"📋 Projects: {active_projects} active, {archived_projects} archived")
+    print(f"👥 People: {total_people} total")
+
+def cmd_diff():
+    """Show changes since last prune"""
+    print("🔍 Context Changes Since Last Prune\n")
+    
+    snapshot = load_snapshot()
+    if not snapshot:
+        print("❌ No previous prune snapshot found")
+        print("💡 Run 'context prune' to create initial snapshot")
+        return
+    
+    print(f"📅 Last prune: {snapshot['timestamp']}")
+    
+    # Check projects_active.md changes
+    if PROJECTS_ACTIVE.exists():
+        current_hash = hashlib.md5(PROJECTS_ACTIVE.read_text().encode()).hexdigest()
+        if current_hash != snapshot.get('projects_active_hash'):
+            print("🔄 projects_active.md has changed since last prune")
+        else:
+            print("✅ projects_active.md unchanged")
+    else:
+        print("❌ projects_active.md not found")
+    
+    # Check people.md changes
+    if PEOPLE_FILE.exists():
+        current_hash = hashlib.md5(PEOPLE_FILE.read_text().encode()).hexdigest()
+        if current_hash != snapshot.get('people_hash'):
+            print("🔄 people.md has changed since last prune")
+        else:
+            print("✅ people.md unchanged")
+    else:
+        print("❌ people.md not found")
+    
+    # Time since last prune
+    try:
+        last_prune = datetime.fromisoformat(snapshot['timestamp'])
+        days_ago = (datetime.now() - last_prune).days
+        print(f"⏰ {days_ago} days since last prune")
+    except:
+        print("⚠️  Could not parse last prune timestamp")
+
+def main():
+    parser = argparse.ArgumentParser(description='Context lifecycle management')
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Audit command
+    audit_parser = subparsers.add_parser('audit', help='Scan for stale/completed items')
+    
+    # Prune command  
+    prune_parser = subparsers.add_parser('prune', help='Move stale items to full archive')
+    
+    # Restore command
+    restore_parser = subparsers.add_parser('restore', help='Restore item from archive')
+    restore_parser.add_argument('name', help='Name or keyword to restore')
+    
+    # Stats command
+    stats_parser = subparsers.add_parser('stats', help='Show context statistics')
+    
+    # Diff command
+    diff_parser = subparsers.add_parser('diff', help='Show changes since last prune')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return
+    
+    # Ensure context directories exist
+    CONTEXT_DIR.mkdir(exist_ok=True)
+    ACTIVE_DIR.mkdir(exist_ok=True)
+    FULL_DIR.mkdir(exist_ok=True)
+    
+    if args.command == 'audit':
+        cmd_audit()
+    elif args.command == 'prune':
+        cmd_prune()
+    elif args.command == 'restore':
+        cmd_restore(args.name)
+    elif args.command == 'stats':
+        cmd_stats()
+    elif args.command == 'diff':
+        cmd_diff()
+
+if __name__ == '__main__':
+    main()

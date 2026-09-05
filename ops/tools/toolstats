@@ -1,0 +1,652 @@
+#!/usr/bin/env python3
+# openjawz-toolstats: tool usage metrics — what runs, how long, what fails, what gathers dust
+# usage: openjawz toolstats log|stats|tool|unused|recent ...
+# owner: openjawz-ops
+# ci: fast
+"""
+toolstats - Simple tool usage tracking for the agent
+No surveillance state, just basic metrics
+"""
+
+import sqlite3
+import argparse
+import sys
+import os
+import time
+from datetime import datetime, timedelta
+from typing import Optional, List, Tuple
+
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+
+
+DB_PATH = str(openjawz_paths.data() / "toolstats.db")
+
+# ANSI color codes matching other tools
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+RED = "\033[31m"
+CYAN = "\033[36m"
+
+
+def init_db():
+    """Initialize database with simple schema"""
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool TEXT NOT NULL,
+                caller TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                duration_ms INTEGER,
+                success BOOLEAN,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_tool ON calls(tool)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_timestamp ON calls(timestamp)")
+        
+        # Enable WAL mode for better concurrency
+        conn.execute("PRAGMA journal_mode=WAL")
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Warning: Could not initialize toolstats database: {e}", file=sys.stderr)
+
+
+def track(tool_name: str, duration_ms: Optional[int] = None, 
+          success: bool = True, caller: Optional[str] = None):
+    """
+    Track tool usage. Fire and forget - never breaks calling tool.
+    
+    Args:
+        tool_name: Name of the tool (without the openjawz- prefix)
+        duration_ms: Execution time in milliseconds
+        success: Whether the tool completed successfully
+        caller: Who called the tool (defaults to OPENJAWZ_AGENT or 'user')
+    """
+    try:
+        if not caller:
+            caller = os.environ.get('OPENJAWZ_AGENT', 'user')
+        
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO calls (tool, caller, timestamp, duration_ms, success)
+            VALUES (?, ?, ?, ?, ?)
+        """, (tool_name, caller, time.time(), duration_ms, success))
+        conn.commit()
+        conn.close()
+    except:
+        # Tracking should never break tools
+        pass
+
+
+def format_duration(ms) -> str:
+    """Format milliseconds to human readable"""
+    if ms is None:
+        return "?"
+    
+    ms = round(float(ms))
+    if ms < 1000:
+        return f"{ms}ms"
+    elif ms < 60000:
+        return f"{ms/1000:.1f}s"
+    else:
+        return f"{ms/60000:.1f}m"
+
+
+def get_report_data(days: int = 7) -> List[Tuple]:
+    """Get usage data for the last N days"""
+    cutoff = time.time() - (days * 86400)
+    
+    conn = safe_db_connect()
+    cursor = conn.execute("""
+        SELECT 
+            tool,
+            COUNT(*) as calls,
+            COUNT(DISTINCT caller) as unique_callers,
+            AVG(duration_ms) as avg_duration,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures
+        FROM calls
+        WHERE timestamp > ?
+        GROUP BY tool
+        ORDER BY calls DESC
+    """, (cutoff,))
+    
+    data = cursor.fetchall()
+    conn.close()
+    return data
+
+
+def get_tool_details(tool: str) -> dict:
+    """Get detailed stats for a specific tool"""
+    conn = safe_db_connect()
+    
+    # Overall stats
+    cursor = conn.execute("""
+        SELECT 
+            COUNT(*) as total_calls,
+            AVG(duration_ms) as avg_duration,
+            MIN(duration_ms) as min_duration,
+            MAX(duration_ms) as max_duration,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
+            MIN(created_at) as first_call,
+            MAX(created_at) as last_call
+        FROM calls
+        WHERE tool = ?
+    """, (tool,))
+    
+    stats = cursor.fetchone()
+    
+    # Caller breakdown
+    cursor = conn.execute("""
+        SELECT caller, COUNT(*) as calls
+        FROM calls
+        WHERE tool = ?
+        GROUP BY caller
+        ORDER BY calls DESC
+    """, (tool,))
+    
+    callers = cursor.fetchall()
+    
+    # Recent calls
+    cursor = conn.execute("""
+        SELECT caller, duration_ms, success, created_at
+        FROM calls
+        WHERE tool = ?
+        ORDER BY created_at DESC
+        LIMIT 10
+    """, (tool,))
+    
+    recent = cursor.fetchall()
+    
+    conn.close()
+    
+    return {
+        'stats': stats,
+        'callers': callers,
+        'recent': recent
+    }
+
+
+def cmd_report(args):
+    """Show usage report"""
+    # Resolve period to days
+    if args.period:
+        period_map = {'today': 1, 'week': 7, 'month': 30, 'all': 99999}
+        days = period_map[args.period]
+        period_label = args.period.title() if args.period != 'all' else 'All Time'
+    elif args.days:
+        days = args.days
+        period_label = f"{days} days"
+    else:
+        days = 7
+        period_label = "Week"
+    
+    data = get_report_data(days)
+    
+    if not data:
+        print(f"{DIM}No tool usage for period: {period_label}{RESET}")
+        return
+    
+    # Header
+    print(f"\n{BOLD}Tool Usage Report{RESET} ({period_label})")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    
+    # Table header
+    print(f"{BOLD}{'Tool':<20} {'Calls':>8} {'Callers':>8} {'Avg Time':>10} {'Failures':>8}{RESET}")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    
+    # Data rows
+    for tool, calls, callers, avg_dur, failures in data:
+        fail_color = RED if failures > 0 else ""
+        print(f"{CYAN}{tool:<20}{RESET} {calls:>8} {callers:>8} "
+              f"{format_duration(avg_dur):>10} "
+              f"{fail_color}{failures:>8}{RESET}")
+    
+    # Summary
+    total_calls = sum(row[1] for row in data)
+    total_tools = len(data)
+    print(f"{DIM}{'─' * 60}{RESET}")
+    print(f"{BOLD}Total:{RESET} {total_calls} calls across {total_tools} tools\n")
+
+
+def cmd_tool(args):
+    """Show detailed stats for a specific tool"""
+    # Normalize: accept with or without the openjawz- prefix
+    name = args.name.removeprefix('openjawz-')
+    
+    details = get_tool_details(name)
+    stats = details['stats']
+    
+    if not stats[0]:  # total_calls
+        print(f"{DIM}No data for tool '{name}'{RESET}")
+        return
+    
+    total_calls, avg_dur, min_dur, max_dur, failures, first_call, last_call = stats
+    
+    # Header
+    tool_display = name
+    print(f"\n{BOLD}{CYAN}{tool_display}{RESET} Usage Statistics")
+    print(f"{DIM}{'─' * 50}{RESET}")
+    
+    # Overview
+    print(f"{BOLD}Total Calls:{RESET} {total_calls}")
+    print(f"{BOLD}Failures:{RESET} {failures} ({failures/total_calls*100:.1f}%)")
+    print(f"{BOLD}First Call:{RESET} {first_call}")
+    print(f"{BOLD}Last Call:{RESET} {last_call}")
+    
+    # Performance
+    print(f"\n{BOLD}Performance:{RESET}")
+    print(f"  Average: {format_duration(avg_dur)}")
+    print(f"  Min: {format_duration(min_dur)}")
+    print(f"  Max: {format_duration(max_dur)}")
+    
+    # Callers
+    print(f"\n{BOLD}Called By:{RESET}")
+    for caller, count in details['callers']:
+        print(f"  {caller}: {count} times")
+    
+    # Recent calls
+    print(f"\n{BOLD}Recent Calls:{RESET}")
+    for caller, dur, success, timestamp in details['recent']:
+        status = "✓" if success else "✗"
+        color = GREEN if success else RED
+        print(f"  {timestamp} | {caller:<10} | {format_duration(dur):>8} | {color}{status}{RESET}")
+    
+    print()
+
+
+def safe_db_connect():
+    """Safely connect to database with error handling"""
+    try:
+        return sqlite3.connect(DB_PATH)
+    except Exception as e:
+        print(f"{RED}Error: Cannot access toolstats database: {e}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+
+def get_period_filter(period: str) -> float:
+    """Convert period string to timestamp cutoff"""
+    now = time.time()
+    if period == 'today':
+        # Start of today
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return today.timestamp()
+    elif period == 'week':
+        return now - (7 * 86400)
+    elif period == 'month':
+        return now - (30 * 86400)
+    else:  # 'all'
+        return 0
+
+
+def cmd_stats(args):
+    """Show system overview"""
+    conn = safe_db_connect()
+    
+    # Overall stats
+    cursor = conn.execute("""
+        SELECT 
+            COUNT(*) as total_invocations,
+            COUNT(DISTINCT tool) as unique_tools,
+            COUNT(DISTINCT caller) as unique_callers,
+            MIN(created_at) as earliest_call,
+            MAX(created_at) as latest_call
+        FROM calls
+    """)
+    
+    stats = cursor.fetchone()
+    total_invocations, unique_tools, unique_callers, earliest_call, latest_call = stats
+    
+    # Database size
+    cursor = conn.execute("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()")
+    size_result = cursor.fetchone()
+    db_size = size_result[0] if size_result else 0
+    
+    conn.close()
+    
+    # Display
+    print(f"\n{BOLD}Tool Statistics Overview{RESET}")
+    print(f"{DIM}{'─' * 40}{RESET}")
+    print(f"{BOLD}Total Invocations:{RESET} {total_invocations:,}")
+    print(f"{BOLD}Unique Tools:{RESET} {unique_tools}")
+    print(f"{BOLD}Unique Callers:{RESET} {unique_callers}")
+    print(f"{BOLD}Database Size:{RESET} {db_size / 1024:.1f} KB")
+    if earliest_call and latest_call:
+        print(f"{BOLD}Date Range:{RESET} {earliest_call} to {latest_call}")
+    print()
+
+
+def cmd_top(args):
+    """Show leaderboard of most-used tools"""
+    cutoff = get_period_filter(args.period)
+    
+    conn = safe_db_connect()
+    
+    if args.by == 'calls':
+        order_by = "calls DESC"
+        header = "Calls"
+    elif args.by == 'time':
+        order_by = "total_time DESC"
+        header = "Total Time"
+    elif args.by == 'failures':
+        order_by = "failures DESC"
+        header = "Failures"
+    else:
+        order_by = "calls DESC"
+        header = "Calls"
+    
+    cursor = conn.execute(f"""
+        SELECT 
+            tool,
+            COUNT(*) as calls,
+            SUM(COALESCE(duration_ms, 0)) as total_time,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures
+        FROM calls
+        WHERE timestamp > ?
+        GROUP BY tool
+        ORDER BY {order_by}
+        LIMIT ?
+    """, (cutoff, args.limit))
+    
+    data = cursor.fetchall()
+    conn.close()
+    
+    if not data:
+        print(f"{DIM}No tool usage in the specified period{RESET}")
+        return
+    
+    period_desc = args.period.title() if args.period != 'all' else 'All Time'
+    print(f"\n{BOLD}Top Tools - {period_desc}{RESET} (by {args.by})")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    print(f"{BOLD}{'Tool':<25} {'Calls':>8} {'Total Time':>12} {'Failures':>8}{RESET}")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    
+    for tool, calls, total_time, failures in data:
+        fail_color = RED if failures > 0 else ""
+        print(f"{CYAN}{tool:<25}{RESET} {calls:>8} {format_duration(total_time):>12} "
+              f"{fail_color}{failures:>8}{RESET}")
+    print()
+
+
+def cmd_agents(args):
+    """Show breakdown by caller/agent"""
+    cutoff = get_period_filter(args.period)
+    
+    conn = safe_db_connect()
+    cursor = conn.execute("""
+        SELECT 
+            caller,
+            COUNT(*) as invocations,
+            AVG(CASE WHEN success = 1 THEN 1.0 ELSE 0.0 END) * 100 as success_rate,
+            SUM(COALESCE(duration_ms, 0)) as total_time
+        FROM calls
+        WHERE timestamp > ?
+        GROUP BY caller
+        ORDER BY invocations DESC
+    """, (cutoff,))
+    
+    data = cursor.fetchall()
+    conn.close()
+    
+    if not data:
+        print(f"{DIM}No agent activity in the specified period{RESET}")
+        return
+    
+    period_desc = args.period.title() if args.period != 'all' else 'All Time'
+    print(f"\n{BOLD}Agent Activity - {period_desc}{RESET}")
+    print(f"{DIM}{'─' * 65}{RESET}")
+    print(f"{BOLD}{'Agent':<15} {'Calls':>8} {'Success%':>10} {'Total Time':>12}{RESET}")
+    print(f"{DIM}{'─' * 65}{RESET}")
+    
+    for caller, invocations, success_rate, total_time in data:
+        rate_color = GREEN if success_rate >= 95 else YELLOW if success_rate >= 85 else RED
+        print(f"{CYAN}{caller:<15}{RESET} {invocations:>8} "
+              f"{rate_color}{success_rate:>9.1f}%{RESET} {format_duration(total_time):>12}")
+    print()
+
+
+def cmd_failures(args):
+    """Show failure analysis"""
+    cutoff = get_period_filter(args.period)
+    
+    conn = safe_db_connect()
+    
+    # Failure rate by tool
+    cursor = conn.execute("""
+        SELECT 
+            tool,
+            COUNT(*) as total_calls,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
+            CAST(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100 as failure_rate
+        FROM calls
+        WHERE timestamp > ?
+        GROUP BY tool
+        HAVING failures > 0
+        ORDER BY failure_rate DESC, failures DESC
+    """, (cutoff,))
+    
+    failure_data = cursor.fetchall()
+    
+    # Recent failures
+    cursor = conn.execute("""
+        SELECT tool, caller, created_at, duration_ms
+        FROM calls
+        WHERE timestamp > ? AND success = 0
+        ORDER BY created_at DESC
+        LIMIT 10
+    """, (cutoff,))
+    
+    recent_failures = cursor.fetchall()
+    conn.close()
+    
+    period_desc = args.period.title() if args.period != 'all' else 'All Time'
+    print(f"\n{BOLD}Failure Analysis - {period_desc}{RESET}")
+    print(f"{DIM}{'─' * 65}{RESET}")
+    
+    if failure_data:
+        print(f"{BOLD}Failure Rate by Tool:{RESET}")
+        print(f"{BOLD}{'Tool':<25} {'Total':>8} {'Fails':>8} {'Rate%':>8}{RESET}")
+        print(f"{DIM}{'─' * 55}{RESET}")
+        
+        for tool, total, failures, rate in failure_data:
+            rate_color = RED if rate >= 20 else YELLOW if rate >= 10 else ""
+            print(f"{CYAN}{tool:<25}{RESET} {total:>8} "
+                  f"{RED}{failures:>8}{RESET} {rate_color}{rate:>7.1f}%{RESET}")
+        
+        print()
+    
+    if recent_failures:
+        print(f"{BOLD}Recent Failures:{RESET}")
+        for tool, caller, timestamp, duration in recent_failures:
+            print(f"  {timestamp} | {RED}{tool:<20}{RESET} | {caller:<10} | {format_duration(duration):>8}")
+    
+    if not failure_data and not recent_failures:
+        print(f"{GREEN}No failures in the specified period{RESET}")
+    
+    print()
+
+
+def cmd_trends(args):
+    """Show usage trends over time"""
+    if args.period == 'week':
+        days = 7
+        label = "Daily Usage - Last 7 Days"
+    else:  # month
+        days = 30
+        label = "Daily Usage - Last 30 Days"
+    
+    conn = safe_db_connect()
+    
+    # Daily counts
+    cursor = conn.execute("""
+        SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as calls,
+            COUNT(DISTINCT tool) as unique_tools,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures
+        FROM calls
+        WHERE created_at >= date('now', ?)
+        GROUP BY DATE(created_at)
+        ORDER BY date
+    """, (f'-{days} days',))
+    
+    daily_data = cursor.fetchall()
+    
+    # Busiest day
+    if daily_data:
+        busiest_day = max(daily_data, key=lambda x: x[1])
+    
+    conn.close()
+    
+    print(f"\n{BOLD}{label}{RESET}")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    print(f"{BOLD}{'Date':<12} {'Calls':>8} {'Tools':>8} {'Failures':>8}{RESET}")
+    print(f"{DIM}{'─' * 60}{RESET}")
+    
+    if daily_data:
+        for date, calls, tools, failures in daily_data:
+            fail_color = RED if failures > 0 else ""
+            busy_marker = f" {YELLOW}★{RESET}" if date == busiest_day[0] else ""
+            print(f"{date:<12} {calls:>8} {tools:>8} "
+                  f"{fail_color}{failures:>8}{RESET}{busy_marker}")
+        
+        print(f"{DIM}{'─' * 60}{RESET}")
+        print(f"{BOLD}Busiest Day:{RESET} {busiest_day[0]} ({busiest_day[1]} calls)")
+    else:
+        print(f"{DIM}No data for the specified period{RESET}")
+    
+    print()
+
+
+def cmd_log(args):
+    """Manually log a tool usage (for testing)"""
+    # Input validation
+    if not args.tool.strip():
+        print(f"{RED}Error: Tool name cannot be empty{RESET}", file=sys.stderr)
+        sys.exit(1)
+    
+    if args.duration is not None:
+        if args.duration < 0:
+            print(f"{RED}Error: Duration cannot be negative{RESET}", file=sys.stderr)
+            sys.exit(1)
+        if args.duration > 86400000:  # 24 hours in ms
+            print(f"{RED}Error: Duration cannot exceed 24 hours (86400000ms){RESET}", file=sys.stderr)
+            sys.exit(1)
+    
+    try:
+        # exit_code is already validated as int by argparse
+        success = args.exit_code == 0
+    except (ValueError, AttributeError):
+        print(f"{RED}Error: Exit code must be an integer{RESET}", file=sys.stderr)
+        sys.exit(1)
+    
+    track(
+        tool_name=args.tool,
+        duration_ms=args.duration,
+        success=success,
+        caller=args.caller
+    )
+    print(f"{GREEN}✓{RESET} Logged usage for {args.tool}")
+
+
+def main():
+    # Initialize DB if needed
+    init_db()
+    
+    parser = argparse.ArgumentParser(
+        description="Simple tool usage tracking for the agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Stats command
+    stats_parser = subparsers.add_parser('stats', help='System overview')
+    
+    # Report command
+    report_parser = subparsers.add_parser('report', help='Show usage report')
+    report_parser.add_argument('--period', choices=['today', 'week', 'month', 'all'], default=None,
+                              help='Time period (default: week)')
+    report_parser.add_argument('-d', '--days', type=int, default=None,
+                              help='Number of days to report (alternative to --period)')
+    
+    # Top command
+    top_parser = subparsers.add_parser('top', help='Leaderboard of most-used tools')
+    top_parser.add_argument('--by', choices=['calls', 'time', 'failures'], default='calls',
+                           help='Sort by calls, time, or failures (default: calls)')
+    top_parser.add_argument('--period', choices=['today', 'week', 'month', 'all'], default='all',
+                           help='Time period (default: all)')
+    top_parser.add_argument('-n', '--limit', type=int, default=20,
+                           help='Number of results (default: 20)')
+    
+    # Agents command
+    agents_parser = subparsers.add_parser('agents', help='Breakdown by caller/agent')
+    agents_parser.add_argument('--period', choices=['today', 'week', 'month', 'all'], default='all',
+                              help='Time period (default: all)')
+    
+    # Failures command
+    failures_parser = subparsers.add_parser('failures', help='Failure analysis')
+    failures_parser.add_argument('--period', choices=['today', 'week', 'month', 'all'], default='all',
+                                 help='Time period (default: all)')
+    
+    # Trends command
+    trends_parser = subparsers.add_parser('trends', help='Usage trends over time')
+    trends_parser.add_argument('--period', choices=['week', 'month'], default='week',
+                              help='Time period (default: week)')
+    
+    # Tool command
+    tool_parser = subparsers.add_parser('tool', help='Show stats for specific tool')
+    tool_parser.add_argument('name', help='Tool name (with or without the openjawz- prefix)')
+    
+    # Log command (for testing/manual logging)
+    log_parser = subparsers.add_parser('log', help='Manually log tool usage')
+    log_parser.add_argument('tool', help='Tool name')
+    log_parser.add_argument('-d', '--duration', type=int, help='Duration in ms')
+    log_parser.add_argument('-c', '--caller', default='user', help='Who called it')
+    log_parser.add_argument('--exit-code', type=int, default=0,
+                           help='Exit code (0 = success, non-zero = failure)')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+    
+    # Route to command
+    if args.command == 'stats':
+        cmd_stats(args)
+    elif args.command == 'report':
+        cmd_report(args)
+    elif args.command == 'top':
+        cmd_top(args)
+    elif args.command == 'agents':
+        cmd_agents(args)
+    elif args.command == 'failures':
+        cmd_failures(args)
+    elif args.command == 'trends':
+        cmd_trends(args)
+    elif args.command == 'tool':
+        cmd_tool(args)
+    elif args.command == 'log':
+        cmd_log(args)
+
+
+if __name__ == '__main__':
+    main()

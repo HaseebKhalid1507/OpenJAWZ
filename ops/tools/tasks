@@ -1,0 +1,948 @@
+#!/usr/bin/env python3
+# openjawz-tasks: task CRUD over tasks.json — add, list, done, due, today, subtasks, history
+# usage: openjawz tasks list|add|done|update|delete|subtask|due|search|today|history ...
+# owner: openjawz-ops
+# ci: fast
+"""
+tasks - Task management system for the agent
+
+Handles tasks.json with proper backups, validation, locking, and full CRUD.
+Built to survive the real world.
+"""
+
+import argparse
+import json
+import os
+import sys
+import shutil
+import fcntl
+import time
+import csv
+from datetime import datetime, date
+from pathlib import Path
+
+import os as _os, sys as _sys
+_d = _os.path.dirname(_os.path.realpath(__file__))
+for _p in (_os.path.join(_d, "lib"), _os.path.join(_d, "..", "..", "ops", "tools", "lib")):
+    if _os.path.isdir(_p):
+        _sys.path.insert(0, _p)
+        break
+import openjawz_paths
+import openjawz_track
+openjawz_track.init()
+
+# Data files - support env var override for testing
+DATA_DIR = openjawz_paths.data()
+TASKS_FILE = DATA_DIR / "tasks.json"
+TASKS_BACKUP = DATA_DIR / "tasks.json.bak"
+HISTORY_FILE = DATA_DIR / "tasks_history.json"
+LOCK_FILE = DATA_DIR / "tasks.json.lock"
+
+# ANSI colors for terminal output
+COLORS = {
+    'red': '\033[31m',
+    'green': '\033[32m',
+    'yellow': '\033[33m',
+    'blue': '\033[34m',
+    'magenta': '\033[35m',
+    'cyan': '\033[36m',
+    'white': '\033[37m',
+    'bold': '\033[1m',
+    'reset': '\033[0m',
+    'dim': '\033[2m'
+}
+
+# Valid enums for validation
+VALID_STATUS = ['todo', 'in-progress', 'done', 'blocked']
+VALID_PRIORITY = ['high', 'medium', 'low', None]
+VALID_CATEGORIES = ['work', 'personal', 'school', 'infrastructure']
+
+def color(text, *styles):
+    """Apply color/style to text for terminal output"""
+    if not sys.stdout.isatty():
+        return text
+    codes = ''.join(COLORS.get(style, '') for style in styles)
+    return f"{codes}{text}{COLORS['reset']}"
+
+def validate_date(date_string):
+    """Validate date format YYYY-MM-DD"""
+    if date_string is None:
+        return None
+    try:
+        datetime.strptime(date_string, '%Y-%m-%d')
+        return date_string
+    except ValueError:
+        raise ValueError(f"Invalid date format: {date_string}. Use YYYY-MM-DD")
+
+def validate_task_data(task_data):
+    """Validate task data before writing"""
+    # Required fields
+    if not task_data.get('title', '').strip():
+        raise ValueError("Task title cannot be empty")
+    
+    # Enums
+    if 'status' in task_data and task_data['status'] not in VALID_STATUS:
+        raise ValueError(f"Invalid status: {task_data['status']}. Must be one of {VALID_STATUS}")
+    
+    if 'priority' in task_data and task_data['priority'] not in VALID_PRIORITY:
+        raise ValueError(f"Invalid priority: {task_data['priority']}. Must be one of {VALID_PRIORITY[:-1]}")
+    
+    # Date validation
+    if 'deadline' in task_data:
+        task_data['deadline'] = validate_date(task_data['deadline'])
+    
+    # Subtasks validation
+    if 'subtasks' in task_data:
+        for i, subtask in enumerate(task_data['subtasks']):
+            if not subtask.get('title', '').strip():
+                raise ValueError(f"Subtask {i+1} title cannot be empty")
+            if subtask.get('status') not in ['todo', 'done']:
+                raise ValueError(f"Invalid subtask status: {subtask.get('status')}")
+
+class TaskManager:
+    def __init__(self):
+        self.data = None
+        self.lock_fd = None
+    
+    def acquire_lock(self, timeout=5):
+        """Acquire file lock with timeout"""
+        self.lock_fd = open(LOCK_FILE, 'w')
+        start_time = time.time()
+        
+        while True:
+            try:
+                fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except IOError:
+                if time.time() - start_time > timeout:
+                    raise Exception("Could not acquire lock - another process is using tasks.json")
+                time.sleep(0.1)
+    
+    def release_lock(self):
+        """Release file lock"""
+        if self.lock_fd:
+            fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
+            self.lock_fd.close()
+            if LOCK_FILE.exists():
+                os.remove(LOCK_FILE)
+    
+    def load_tasks(self):
+        """Load tasks from JSON file"""
+        if not TASKS_FILE.exists():
+            self.data = {"next_id": 1, "tasks": []}
+            return
+        
+        try:
+            with open(TASKS_FILE, 'r') as f:
+                self.data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise Exception(f"Corrupted tasks.json: {e}")
+    
+    def backup_and_save(self):
+        """Backup current file and save new data"""
+        # Always backup before write
+        if TASKS_FILE.exists():
+            shutil.copy2(TASKS_FILE, TASKS_BACKUP)
+        
+        # Write atomically
+        temp_file = TASKS_FILE.with_suffix('.tmp')
+        with open(temp_file, 'w') as f:
+            json.dump(self.data, f, indent=2, ensure_ascii=False)
+        
+        # Atomic rename
+        temp_file.rename(TASKS_FILE)
+    
+    def find_task(self, task_id):
+        """Find task by ID"""
+        for task in self.data['tasks']:
+            if task['id'] == task_id:
+                return task
+        return None
+    
+    def format_task(self, task, format_type='color', show_subtasks=True):
+        """Format task for output"""
+        if format_type == 'json':
+            return json.dumps(task, indent=2, ensure_ascii=False)
+        
+        if format_type == 'csv':
+            # Flatten for CSV
+            return {
+                'id': task['id'],
+                'title': task['title'],
+                'status': task['status'],
+                'priority': task.get('priority', ''),
+                'deadline': task.get('deadline', ''),
+                'category': task.get('category', ''),
+                'created': task['created'],
+                'subtasks': len(task.get('subtasks', []))
+            }
+        
+        # Color/plain formatting
+        if format_type == 'plain':
+            c = lambda text, *_: text
+        else:
+            c = color
+        
+        # Status colors
+        status_colors = {
+            'todo': 'yellow',
+            'in-progress': 'cyan',
+            'done': 'green',
+            'blocked': 'red'
+        }
+        
+        # Priority symbols
+        priority_symbols = {
+            'high': '🔥',
+            'medium': '⚡',
+            'low': '💤',
+            None: '  '
+        }
+        
+        # Build output
+        lines = []
+        
+        # Main task line
+        status = c(f"[{task['status']}]", status_colors.get(task['status'], 'white'), 'bold')
+        priority = priority_symbols.get(task.get('priority'))
+        task_id = c(f"#{task['id']}", 'dim')
+        title = task['title']
+        
+        # Add deadline warning if overdue or soon
+        deadline_str = ""
+        if task.get('deadline'):
+            deadline = datetime.strptime(task['deadline'], '%Y-%m-%d').date()
+            today = date.today()
+            days_until = (deadline - today).days
+            
+            if days_until < 0:
+                deadline_str = c(f" ⏰ OVERDUE by {-days_until} days", 'red', 'bold')
+            elif days_until == 0:
+                deadline_str = c(" ⏰ DUE TODAY", 'yellow', 'bold')
+            elif days_until <= 3:
+                deadline_str = c(f" ⏰ Due in {days_until} days", 'yellow')
+            else:
+                deadline_str = c(f" 📅 {task['deadline']}", 'dim')
+        
+        # Category
+        category_str = ""
+        if task.get('category'):
+            category_str = c(f" [{task['category']}]", 'magenta', 'dim')
+        
+        lines.append(f"{priority} {status} {task_id} {title}{deadline_str}{category_str}")
+        
+        # Subtasks
+        if show_subtasks and task.get('subtasks'):
+            for i, subtask in enumerate(task['subtasks'], 1):
+                check = '✓' if subtask['status'] == 'done' else '○'
+                sub_color = 'green' if subtask['status'] == 'done' else 'dim'
+                lines.append(f"     {c(check, sub_color)} {c(f'{i}.', 'dim')} {c(subtask['title'], sub_color)}")
+        
+        return '\n'.join(lines)
+    
+    def matches_search(self, task, query):
+        """Check if task matches search query"""
+        query_lower = query.lower()
+        
+        # Search in title
+        if query_lower in task['title'].lower():
+            return True
+        
+        # Search in subtasks
+        for subtask in task.get('subtasks', []):
+            if query_lower in subtask['title'].lower():
+                return True
+        
+        # Search in category
+        if task.get('category') and query_lower in task['category'].lower():
+            return True
+        
+        return False
+    
+    def list_tasks(self, args):
+        """List tasks with filtering"""
+        tasks = self.data['tasks']
+        
+        # Apply filters
+        if args.status:
+            tasks = [t for t in tasks if t['status'] == args.status]
+        
+        if args.priority:
+            tasks = [t for t in tasks if t.get('priority') == args.priority]
+        
+        if args.category:
+            tasks = [t for t in tasks if t.get('category') == args.category]
+        
+        if args.search:
+            tasks = [t for t in tasks if self.matches_search(t, args.search)]
+        
+        if args.contains:
+            tasks = [t for t in tasks if args.contains.lower() in t['title'].lower()]
+        
+        if args.since:
+            cutoff = datetime.now().date()
+            cutoff = cutoff.replace(day=cutoff.day - args.since)
+            tasks = [t for t in tasks 
+                    if datetime.strptime(t['created'], '%Y-%m-%d').date() >= cutoff]
+        
+        if args.today:
+            # "today" means: due today, overdue, or high priority with no deadline
+            today = date.today()
+            today_tasks = []
+            
+            for task in tasks:
+                if task['status'] in ['done', 'blocked']:
+                    continue
+                    
+                if task.get('deadline'):
+                    deadline = datetime.strptime(task['deadline'], '%Y-%m-%d').date()
+                    if deadline <= today:
+                        today_tasks.append(task)
+                elif task.get('priority') == 'high':
+                    today_tasks.append(task)
+            
+            tasks = today_tasks
+        
+        # Sort
+        if args.sort == 'created':
+            tasks.sort(key=lambda t: t['created'])
+        elif args.sort == 'deadline':
+            # Tasks with deadlines first, then by deadline, then without
+            def deadline_key(t):
+                if t.get('deadline'):
+                    return (0, t['deadline'])
+                return (1, t['created'])
+            tasks.sort(key=deadline_key)
+        elif args.sort == 'priority':
+            priority_order = {'high': 0, 'medium': 1, 'low': 2, None: 3}
+            tasks.sort(key=lambda t: priority_order.get(t.get('priority'), 3))
+        
+        # Output
+        if not tasks:
+            print(color("No tasks found.", 'dim'))
+            return
+        
+        if args.format == 'json':
+            print(json.dumps(tasks, indent=2, ensure_ascii=False))
+        elif args.format == 'csv':
+            if not tasks:
+                return
+            
+            writer = csv.DictWriter(sys.stdout, 
+                fieldnames=['id', 'title', 'status', 'priority', 'deadline', 'category', 'created', 'subtasks'])
+            writer.writeheader()
+            for task in tasks:
+                writer.writerow(self.format_task(task, 'csv'))
+        else:
+            # Terminal output
+            show_subtasks = not args.no_subtasks
+            for i, task in enumerate(tasks):
+                if i > 0:
+                    print()  # Blank line between tasks
+                print(self.format_task(task, args.format, show_subtasks))
+    
+    def add_task(self, args):
+        """Add new task"""
+        # Parse category shortcut
+        category = None
+        if args.category:
+            if args.category in ['w', 'cw']:
+                category = 'work'
+            elif args.category in ['p', 'cp']:
+                category = 'personal'
+            elif args.category in ['s', 'cs']:
+                category = 'school'
+            elif args.category in ['i', 'ci']:
+                category = 'infrastructure'
+            else:
+                category = args.category
+        
+        # Build task
+        task = {
+            'id': self.data['next_id'],
+            'title': args.title,
+            'status': 'todo',
+            'priority': args.priority,
+            'deadline': validate_date(args.deadline) if args.deadline else None,
+            'category': category,
+            'created': date.today().strftime('%Y-%m-%d'),
+            'subtasks': []
+        }
+        
+        # Add subtasks if provided
+        if args.subtask:
+            for st in args.subtask:
+                task['subtasks'].append({
+                    'title': st,
+                    'status': 'todo'
+                })
+        
+        # Validate before adding
+        validate_task_data(task)
+        
+        # Add and save
+        self.data['tasks'].append(task)
+        self.data['next_id'] += 1
+        self.backup_and_save()
+        
+        print(color(f"✓ Added task #{task['id']}: {task['title']}", 'green'))
+        if task.get('subtasks'):
+            print(color(f"  with {len(task['subtasks'])} subtasks", 'dim'))
+    
+    def update_task(self, args):
+        """Update existing task"""
+        # Support bulk updates
+        task_ids = []
+        for id_spec in args.task_id.split(','):
+            if '-' in id_spec:
+                start, end = map(int, id_spec.split('-'))
+                task_ids.extend(range(start, end + 1))
+            else:
+                task_ids.append(int(id_spec))
+        
+        updated_count = 0
+        for task_id in task_ids:
+            task = self.find_task(task_id)
+            if not task:
+                print(color(f"✗ Task #{task_id} not found", 'red'))
+                continue
+            
+            # Apply updates
+            if args.title:
+                task['title'] = args.title
+            if args.status:
+                task['status'] = args.status
+            if args.priority is not None:
+                task['priority'] = args.priority if args.priority != 'none' else None
+            if args.deadline is not None:
+                task['deadline'] = validate_date(args.deadline) if args.deadline != 'none' else None
+            if args.category is not None:
+                if args.category == 'none':
+                    task['category'] = None
+                elif args.category in ['w', 'cw']:
+                    task['category'] = 'work'
+                elif args.category in ['p', 'cp']:
+                    task['category'] = 'personal'
+                elif args.category in ['s', 'cs']:
+                    task['category'] = 'school'
+                elif args.category in ['i', 'ci']:
+                    task['category'] = 'infrastructure'
+                else:
+                    task['category'] = args.category
+            
+            # Validate updated task
+            validate_task_data(task)
+            updated_count += 1
+        
+        if updated_count > 0:
+            self.backup_and_save()
+            print(color(f"✓ Updated {updated_count} task(s)", 'green'))
+    
+    def complete_task(self, args):
+        """Mark task(s) as done"""
+        # Support bulk operations
+        task_ids = []
+        for id_spec in args.task_id.split(','):
+            if '-' in id_spec:
+                start, end = map(int, id_spec.split('-'))
+                task_ids.extend(range(start, end + 1))
+            else:
+                task_ids.append(int(id_spec))
+        
+        completed_count = 0
+        archived_count = 0
+        
+        for task_id in task_ids:
+            task = self.find_task(task_id)
+            if not task:
+                print(color(f"✗ Task #{task_id} not found", 'red'))
+                continue
+            
+            # Check if already done
+            if task['status'] == 'done':
+                print(color(f"⚠ Task #{task_id} is already done", 'yellow'))
+                continue
+            
+            # Mark as done
+            task['status'] = 'done'
+            
+            # Mark all subtasks as done if requested
+            if args.subtasks:
+                for subtask in task.get('subtasks', []):
+                    subtask['status'] = 'done'
+            
+            completed_count += 1
+            
+            # Archive if requested
+            if args.archive:
+                self.archive_task(task)
+                archived_count += 1
+        
+        if completed_count > 0:
+            self.backup_and_save()
+            msg = f"✓ Completed {completed_count} task(s)"
+            if archived_count > 0:
+                msg += f" and archived {archived_count}"
+            print(color(msg, 'green'))
+    
+    def archive_task(self, task):
+        """Move task to history"""
+        # Load history
+        history = {"completed": []}
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, 'r') as f:
+                history = json.load(f)
+        
+        # Add to history
+        history_entry = {
+            'id': task['id'],
+            'title': task['title'],
+            'category': task.get('category'),
+            'created': task['created'],
+            'completed_on': date.today().strftime('%Y-%m-%d')
+        }
+        history['completed'].append(history_entry)
+        
+        # Save history
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+        
+        # Remove from active tasks
+        self.data['tasks'] = [t for t in self.data['tasks'] if t['id'] != task['id']]
+    
+    def delete_task(self, args):
+        """Delete task(s) - requires confirmation"""
+        # Parse task IDs
+        task_ids = []
+        for id_spec in args.task_id.split(','):
+            if '-' in id_spec:
+                start, end = map(int, id_spec.split('-'))
+                task_ids.extend(range(start, end + 1))
+            else:
+                task_ids.append(int(id_spec))
+        
+        # Find all tasks to delete
+        tasks_to_delete = []
+        for task_id in task_ids:
+            task = self.find_task(task_id)
+            if task:
+                tasks_to_delete.append(task)
+        
+        if not tasks_to_delete:
+            print(color("No tasks found to delete", 'red'))
+            return
+        
+        # Show what will be deleted
+        print(color("The following tasks will be deleted:", 'yellow'))
+        for task in tasks_to_delete:
+            print(f"  #{task['id']}: {task['title']}")
+        
+        # Confirm
+        if not args.force:
+            confirm = input(color("\nDelete these tasks? [y/N] ", 'yellow'))
+            if confirm.lower() != 'y':
+                print(color("Cancelled", 'dim'))
+                return
+        
+        # Delete
+        self.data['tasks'] = [t for t in self.data['tasks'] 
+                             if t not in tasks_to_delete]
+        self.backup_and_save()
+        print(color(f"✓ Deleted {len(tasks_to_delete)} task(s)", 'green'))
+    
+    def handle_subtask(self, args):
+        """Subtask operations"""
+        task = self.find_task(args.task_id)
+        if not task:
+            print(color(f"✗ Task #{args.task_id} not found", 'red'))
+            return
+        
+        if args.action == 'add':
+            # Add new subtask - need title
+            if not args.args:
+                print(color("✗ subtask add requires a title", 'red'))
+                return
+            
+            title = ' '.join(args.args)
+            new_subtask = {
+                'title': title,
+                'status': 'todo'
+            }
+            if 'subtasks' not in task:
+                task['subtasks'] = []
+            task['subtasks'].append(new_subtask)
+            self.backup_and_save()
+            print(color(f"✓ Added subtask to task #{task['id']}: {title}", 'green'))
+            
+        elif args.action == 'done':
+            # Mark subtask as done - need index
+            if not args.args or not args.args[0].isdigit():
+                print(color("✗ subtask done requires subtask number", 'red'))
+                return
+            
+            index = int(args.args[0])
+            if index < 1 or index > len(task.get('subtasks', [])):
+                print(color(f"✗ Task #{task['id']} only has {len(task.get('subtasks', []))} subtasks", 'red'))
+                return
+            
+            subtask = task['subtasks'][index - 1]
+            subtask['status'] = 'done'
+            self.backup_and_save()
+            print(color(f"✓ Marked subtask {index} as done", 'green'))
+            
+        elif args.action == 'rm':
+            # Remove subtask - need index
+            if not args.args or not args.args[0].isdigit():
+                print(color("✗ subtask rm requires subtask number", 'red'))
+                return
+                
+            index = int(args.args[0])
+            if index < 1 or index > len(task.get('subtasks', [])):
+                print(color(f"✗ Task #{task['id']} only has {len(task.get('subtasks', []))} subtasks", 'red'))
+                return
+            
+            removed = task['subtasks'].pop(index - 1)
+            self.backup_and_save()
+            print(color(f"✓ Removed subtask: {removed['title']}", 'green'))
+            
+        elif args.action == 'move':
+            # Move subtask to new position - need from and to indices
+            if len(args.args) < 2 or not args.args[0].isdigit() or not args.args[1].isdigit():
+                print(color("✗ subtask move requires <from> <to> positions", 'red'))
+                return
+            
+            from_index = int(args.args[0])
+            to_index = int(args.args[1])
+            
+            if from_index < 1 or from_index > len(task.get('subtasks', [])):
+                print(color(f"✗ Task #{task['id']} only has {len(task.get('subtasks', []))} subtasks", 'red'))
+                return
+            
+            if to_index < 1 or to_index > len(task['subtasks']):
+                print(color(f"✗ Cannot move to position {to_index}", 'red'))
+                return
+            
+            # Move the subtask
+            subtask = task['subtasks'].pop(from_index - 1)
+            task['subtasks'].insert(to_index - 1, subtask)
+            self.backup_and_save()
+            print(color(f"✓ Moved subtask from position {from_index} to {to_index}", 'green'))
+    
+    def clean_completed(self, args):
+        """Archive all completed tasks"""
+        completed_tasks = [t for t in self.data['tasks'] if t['status'] == 'done']
+        
+        if not completed_tasks:
+            print(color("No completed tasks to archive", 'dim'))
+            return
+        
+        print(color(f"Found {len(completed_tasks)} completed tasks", 'yellow'))
+        
+        # Confirm unless forced
+        if not args.force:
+            confirm = input(color("Archive all completed tasks? [y/N] ", 'yellow'))
+            if confirm.lower() != 'y':
+                print(color("Cancelled", 'dim'))
+                return
+        
+        # Archive each
+        for task in completed_tasks:
+            self.archive_task(task)
+        
+        self.backup_and_save()
+        print(color(f"✓ Archived {len(completed_tasks)} tasks", 'green'))
+    
+    def show_history(self, args):
+        """Show archived tasks"""
+        if not HISTORY_FILE.exists():
+            print(color("No task history found", 'dim'))
+            return
+        
+        with open(HISTORY_FILE, 'r') as f:
+            history = json.load(f)
+        
+        completed = history.get('completed', [])
+        if not completed:
+            print(color("No completed tasks in history", 'dim'))
+            return
+        
+        # Sort by completion date (newest first)
+        completed.sort(key=lambda t: t['completed_on'], reverse=True)
+        
+        # Limit if requested
+        if args.limit:
+            completed = completed[:args.limit]
+        
+        # Output
+        if args.format == 'json':
+            print(json.dumps(completed, indent=2, ensure_ascii=False))
+        elif args.format == 'csv':
+            writer = csv.DictWriter(sys.stdout, 
+                fieldnames=['id', 'title', 'category', 'created', 'completed_on'])
+            writer.writeheader()
+            for task in completed:
+                writer.writerow(task)
+        else:
+            # Terminal output
+            for task in completed:
+                c = color if args.format == 'color' else lambda text, *_: text
+                
+                task_id = c(f"#{task['id']}", 'dim')
+                title = task['title']
+                category = c(f"[{task['category']}]", 'magenta', 'dim') if task.get('category') else ""
+                dates = c(f"{task['created']} → {task['completed_on']}", 'dim')
+                
+                print(f"{task_id} {title} {category} {dates}")
+    
+    def today_tasks(self, args):
+        """Show today's tasks - convenience wrapper"""
+        # Convert to list args
+        args.status = None
+        args.priority = None
+        args.category = None
+        args.today = True
+        args.search = None
+        args.contains = None
+        args.since = None
+        args.sort = None
+        args.no_subtasks = False
+        self.list_tasks(args)
+    
+    def due_tasks(self, args):
+        """Show tasks with deadlines, sorted by nearest first"""
+        tasks = [t for t in self.data['tasks'] if t.get('deadline')]
+        
+        if not tasks:
+            print(color("No tasks with deadlines", 'dim'))
+            return
+        
+        # Sort by deadline
+        tasks.sort(key=lambda t: t['deadline'])
+        
+        if args.format == 'json':
+            print(json.dumps(tasks, indent=2, ensure_ascii=False))
+        else:
+            today = date.today()
+            for i, task in enumerate(tasks):
+                if i > 0:
+                    print()
+                
+                deadline = datetime.strptime(task['deadline'], '%Y-%m-%d').date()
+                days_until = (deadline - today).days
+                
+                # Add overdue flag
+                if days_until < 0:
+                    task_copy = task.copy()
+                    task_copy['_overdue'] = True
+                    formatted = self.format_task(task_copy, args.format)
+                    print(color("OVERDUE: ", 'red', 'bold') + formatted)
+                else:
+                    print(self.format_task(task, args.format))
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Task management (shell twin of the synaps-tasks plugin; same tasks.json)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  tasks add "Fix the hyperdrive" -p high -cw
+  tasks list --today
+  tasks done 42
+  tasks update 42 --status in-progress
+  tasks subtask 42 add "Get parts from Mos Eisley"
+  tasks subtask 42 done 1
+  tasks search "docker"
+  tasks clean
+
+Today view shows:
+  - Tasks due today or overdue
+  - High priority tasks with no deadline
+  - Excludes done/blocked tasks
+        """
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # List command
+    list_parser = subparsers.add_parser('list', help='List tasks (default command)')
+    list_parser.add_argument('--status', choices=VALID_STATUS, help='Filter by status')
+    list_parser.add_argument('--priority', choices=['high', 'medium', 'low'], help='Filter by priority')
+    list_parser.add_argument('--category', '-c', help='Filter by category')
+    list_parser.add_argument('--today', action='store_true', help='Show today\'s tasks')
+    list_parser.add_argument('--search', '-s', help='Full text search')
+    list_parser.add_argument('--contains', help='Title contains text')
+    list_parser.add_argument('--since', type=int, metavar='DAYS', help='Created in last N days')
+    list_parser.add_argument('--sort', choices=['created', 'deadline', 'priority'], help='Sort tasks')
+    list_parser.add_argument('--format', choices=['color', 'plain', 'json', 'csv'], default='color', help='Output format')
+    list_parser.add_argument('--no-subtasks', action='store_true', help='Hide subtasks')
+    
+    # Add command
+    add_parser = subparsers.add_parser('add', help='Add new task')
+    add_parser.add_argument('title', help='Task title')
+    add_parser.add_argument('-p', '--priority', choices=['high', 'medium', 'low'], help='Task priority')
+    add_parser.add_argument('-d', '--deadline', help='Deadline (YYYY-MM-DD)')
+    add_parser.add_argument('-c', '--category', help='Category (work/w, personal/p, school/s, infra/i)')
+    add_parser.add_argument('-s', '--subtask', action='append', help='Add subtask (can repeat)')
+    
+    # Update command
+    update_parser = subparsers.add_parser('update', help='Update task(s)')
+    update_parser.add_argument('task_id', help='Task ID(s) - supports ranges (1-5) and lists (1,3,5)')
+    update_parser.add_argument('-t', '--title', help='New title')
+    update_parser.add_argument('-s', '--status', choices=VALID_STATUS, help='New status')
+    update_parser.add_argument('-p', '--priority', choices=['high', 'medium', 'low', 'none'], help='New priority')
+    update_parser.add_argument('-d', '--deadline', help='New deadline (YYYY-MM-DD or "none")')
+    update_parser.add_argument('-c', '--category', help='New category (or "none")')
+    
+    # Done command
+    done_parser = subparsers.add_parser('done', help='Mark task(s) as done')
+    done_parser.add_argument('task_id', help='Task ID(s) - supports ranges and lists')
+    done_parser.add_argument('--subtasks', action='store_true', help='Also mark all subtasks as done')
+    done_parser.add_argument('--archive', action='store_true', help='Archive after marking done')
+    
+    # Delete command
+    delete_parser = subparsers.add_parser('delete', help='Delete task(s)')
+    delete_parser.add_argument('task_id', help='Task ID(s) - supports ranges and lists')
+    delete_parser.add_argument('-f', '--force', action='store_true', help='Skip confirmation')
+    
+    # Subtask command
+    subtask_parser = subparsers.add_parser('subtask', help='Manage subtasks')
+    subtask_parser.add_argument('task_id', type=int, help='Parent task ID')
+    subtask_parser.add_argument('action', choices=['add', 'done', 'rm', 'move'], help='Subtask action')
+    subtask_parser.add_argument('args', nargs='*', help='Arguments based on action: add "title" | done <index> | rm <index> | move <from> <to>')
+    
+    # Archive command
+    archive_parser = subparsers.add_parser('archive', help='Archive specific task')
+    archive_parser.add_argument('task_id', type=int, help='Task ID to archive')
+    
+    # Clean command
+    clean_parser = subparsers.add_parser('clean', help='Archive all completed tasks')
+    clean_parser.add_argument('-f', '--force', action='store_true', help='Skip confirmation')
+    
+    # History command
+    history_parser = subparsers.add_parser('history', help='Show archived tasks')
+    history_parser.add_argument('--limit', '-n', type=int, help='Limit number of results')
+    history_parser.add_argument('--format', choices=['color', 'plain', 'json', 'csv'], default='color', help='Output format')
+    
+    # Search command (alias for list --search)
+    search_parser = subparsers.add_parser('search', help='Search tasks')
+    search_parser.add_argument('query', help='Search query')
+    search_parser.add_argument('--format', choices=['color', 'plain', 'json', 'csv'], default='color', help='Output format')
+    
+    # Today command (alias for list --today)
+    today_parser = subparsers.add_parser('today', help='Show today\'s tasks')
+    today_parser.add_argument('--format', choices=['color', 'plain', 'json', 'csv'], default='color', help='Output format')
+    
+    # Due command - show tasks with deadlines
+    due_parser = subparsers.add_parser('due', help='Show tasks with deadlines')
+    due_parser.add_argument('--format', choices=['color', 'plain', 'json', 'csv'], default='color', help='Output format')
+    
+    # Sub command (alias for subtask add)
+    sub_parser = subparsers.add_parser('sub', help='Add subtask (shorthand)')
+    sub_parser.add_argument('task_id', type=int, help='Parent task ID')
+    sub_parser.add_argument('title', nargs='+', help='Subtask title')
+    
+    # Sub-done command (alias for subtask done)
+    subdone_parser = subparsers.add_parser('sub-done', help='Mark subtask done (shorthand)')
+    subdone_parser.add_argument('task_id', type=int, help='Parent task ID')
+    subdone_parser.add_argument('index', type=int, help='Subtask index (1-based)')
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Default to list if no command
+    if not args.command:
+        args.command = 'list'
+        args.status = None
+        args.priority = None
+        args.category = None
+        args.today = False
+        args.search = None
+        args.contains = None
+        args.since = None
+        args.sort = None
+        args.format = 'color'
+        args.no_subtasks = False
+    
+    # Handle alias commands (convert to base commands)
+    if args.command == 'search':
+        args.command = 'list'
+        args.search = args.query
+        args.status = None
+        args.priority = None
+        args.category = None
+        args.today = False
+        args.contains = None
+        args.since = None
+        args.sort = None
+        args.no_subtasks = False
+    elif args.command == 'today':
+        args.command = 'list'
+        args.status = None
+        args.priority = None
+        args.category = None
+        args.today = True
+        args.search = None
+        args.contains = None
+        args.since = None
+        args.sort = None
+        args.no_subtasks = False
+    elif args.command == 'sub':
+        args.command = 'subtask'
+        args.action = 'add'
+        args.args = [' '.join(args.title)]
+    elif args.command == 'sub-done':
+        args.command = 'subtask'
+        args.action = 'done'
+        args.args = [str(args.index)]
+    
+    # Execute command
+    tm = TaskManager()
+    
+    try:
+        # Commands that need write access
+        write_commands = ['add', 'update', 'done', 'delete', 'subtask', 'archive', 'clean']
+        
+        if args.command in write_commands:
+            tm.acquire_lock()
+        
+        tm.load_tasks()
+        
+        # Route to appropriate handler
+        if args.command == 'list':
+            tm.list_tasks(args)
+        elif args.command == 'add':
+            tm.add_task(args)
+        elif args.command == 'update':
+            tm.update_task(args)
+        elif args.command == 'done':
+            tm.complete_task(args)
+        elif args.command == 'delete':
+            tm.delete_task(args)
+        elif args.command == 'subtask':
+            tm.handle_subtask(args)
+        elif args.command == 'archive':
+            task = tm.find_task(args.task_id)
+            if not task:
+                print(color(f"✗ Task #{args.task_id} not found", 'red'))
+            else:
+                tm.archive_task(task)
+                tm.backup_and_save()
+                print(color(f"✓ Archived task #{args.task_id}", 'green'))
+        elif args.command == 'clean':
+            tm.clean_completed(args)
+        elif args.command == 'history':
+            tm.show_history(args)
+        elif args.command == 'due':
+            tm.due_tasks(args)
+    
+    except KeyboardInterrupt:
+        print(color("\n✗ Interrupted", 'yellow'))
+        sys.exit(1)
+    except Exception as e:
+        print(color(f"✗ Error: {e}", 'red'))
+        sys.exit(1)
+    finally:
+        tm.release_lock()
+
+if __name__ == "__main__":
+    main()

@@ -135,7 +135,7 @@ seed() { [ -e "$1" ] || printf '%s\n' "$2" > "$1"; }
 seed "$OPENJAWZ_HOME/context/active/handoff.md" $'# Handoff\n\nNo active handoff.'
 seed "$OPENJAWZ_HOME/context/active/checkpoint.md" "# Checkpoint — none (fresh install $(date -I))"
 seed "$OPENJAWZ_HOME/context/active/sessions_recent.md" $'# Recent Sessions\n'
-seed "$OPENJAWZ_HOME/context/full/sessions_full.md" $'# Session Log\n'
+seed "$OPENJAWZ_HOME/context/full/sessions_full.md" $'# Session Log\n\nOne line per session. What happened, what changed, what matters.\n\n---\n'
 seed "$OPENJAWZ_HOME/context/active/projects_active.md" $'# Active Projects\n'
 seed "$OPENJAWZ_HOME/context/full/projects_full.md" $'# Projects — full\n'
 seed "$OPENJAWZ_HOME/context/people.md" $'# People\n'

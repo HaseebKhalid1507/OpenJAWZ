@@ -11,7 +11,11 @@ Numbers from the Synaps daemon-mode work, measured on a 24-core Linux box with `
 
 Client: 2.3 MB idle, 3 threads, first frame under 10 ms, bounded against session length. One rendered code block costs ~11 MB of compiled syntax grammars until idle eviction (120 s) — stated, not hidden.
 
-Gates are CI. If a change moves a number, the change carries the new number.
+The gates (`tests/memprof/gates.sh`: G1–G5, G7, parked marginal) are **not CI**. CI runs `gates.sh --dry`,
+which only proves the scripts parse. The real gates run on the bench box with `OPENJAWZ_MEMPROF=1
+tests/memprof/run.sh` against the installed binary, and as of v0.1.0 they have **not been run** here —
+the numbers above are the runtime's, restated. If a change moves a number, the change carries the new
+number and the bench-box run that produced it.
 
 ## Hooks — idle cost
 

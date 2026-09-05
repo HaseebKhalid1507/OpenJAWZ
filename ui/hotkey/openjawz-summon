@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# openjawz-summon: the hotkey — toggle the agent window (special workspace) or open one
+# usage: openjawz summon [--focus] [--new] [--session ID]
+# owner: openjawz-ui
+# ci: fast
+#
+# Hot path, ~100 ms: no jq, no daemon round-trip. Terminal choice is cached by `openjawz ui install`
+# in $XDG_RUNTIME_DIR/openjawz/term (footclient → foot → kitty → ghostty → $TERMINAL).
+#   default  Hyprland: toggle special:jawz if a window of class `openjawz` exists, else launch (rule places it there)
+#   --focus  focus the existing window in place instead of the special workspace (tiled users)
+#   --new    always a fresh session (`synaps --attach --new`); default attaches to the sole live session or creates
+set -euo pipefail
+mode=toggle new=0 sid=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --focus) mode=focus ;; --new) new=1 ;; --session) sid=$2; shift ;;
+    -h|--help) sed -n '2,4p' "$0" | sed 's/^# //'; exit 0 ;;
+    *) echo "openjawz-summon: unknown flag $1" >&2; exit 2 ;;
+  esac; shift
+done
+
+rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+cache=$rt/openjawz/term
+CLASS=openjawz WS=jawz
+
+# ── an agent window already exists? ─────────────────────────────────────────
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -d "$rt/hypr" ]; then
+  if hyprctl -j clients 2>/dev/null | grep -q "\"class\": \"$CLASS\""; then      # grep ≈ 1 ms, jq ≈ 20 ms
+    if [ "$mode" = focus ]; then
+      addr=$(hyprctl -j clients | grep -B20 "\"class\": \"$CLASS\"" | grep -m1 '"address"' | sed 's/.*"address": "\([^"]*\)".*/\1/')
+      exec hyprctl dispatch focuswindow "address:$addr"
+    fi
+    exec hyprctl dispatch togglespecialworkspace "$WS"
+  fi
+elif [ -n "${SWAYSOCK:-}" ]; then
+  if swaymsg -t get_tree 2>/dev/null | grep -q "\"app_id\": \"$CLASS\""; then
+    exec swaymsg "[app_id=\"$CLASS\"] scratchpad show"
+  fi
+fi
+
+# ── none: launch one ────────────────────────────────────────────────────────
+attach=(synaps --attach)
+if [ -n "$sid" ]; then attach+=("$sid"); elif [ "$new" = 1 ]; then attach+=(--new); fi
+
+term=$(cat "$cache" 2>/dev/null || true)
+if [ -z "$term" ]; then
+  if command -v footclient >/dev/null && systemctl --user -q is-active foot-server.socket 2>/dev/null; then term=footclient
+  elif command -v foot >/dev/null; then term=foot
+  elif command -v kitty >/dev/null; then term=kitty
+  elif command -v ghostty >/dev/null; then term=ghostty
+  else term=${TERMINAL:-xterm}; fi
+fi
+
+case $term in
+  footclient) exec footclient -N -a "$CLASS" -T OpenJAWZ "${attach[@]}" ;;
+  foot)       exec setsid -f foot -a "$CLASS" -T OpenJAWZ "${attach[@]}" ;;
+  kitty)      exec setsid -f kitty -1 --instance-group "$CLASS" --class "$CLASS" -T OpenJAWZ "${attach[@]}" ;;
+  ghostty)    exec setsid -f ghostty --class="$CLASS" --title=OpenJAWZ -e "${attach[@]}" ;;
+  *)          exec setsid -f "$term" -e "${attach[@]}" ;;
+esac

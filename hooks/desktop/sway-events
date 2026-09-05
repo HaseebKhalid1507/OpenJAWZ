@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# openjawz hook: desktop (sway) — swaymsg -t subscribe -m → focus/workspace/monitor
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init desktop
+command -v swaymsg >/dev/null || bridge::skip "swaymsg not installed"
+command -v jq >/dev/null || bridge::skip "jq not installed"
+
+sway::parse() {
+  # one tab-separated line per event: kind change app title
+  local kind change app title
+  while IFS=$'\t' read -r kind change app title; do
+    case "$kind:$change" in
+      window:focus)     bridge::event focus low "class=$app" "title=$title" ;;
+      workspace:focus)  bridge::event workspace low "name=$title" ;;
+      output:*)         bridge::event monitor medium "change=$change" ;;
+      *) ;;
+    esac
+  done
+}
+
+filter='[
+  (if .change and (.container? // .current?) then (if .container then "window" else "workspace" end) else "output" end),
+  (.change // ""),
+  (.container.app_id // .container.window_properties.class // ""),
+  (.container.name // .current.name // "")
+] | @tsv'
+
+if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
+  jq -r "$filter" < "$OPENJAWZ_HOOK_REPLAY" | sway::parse
+else
+  sway::parse < <(swaymsg -t subscribe -m '["window","workspace","output"]' | exec jq --unbuffered -r "$filter")
+fi

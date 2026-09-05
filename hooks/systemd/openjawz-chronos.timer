@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenJAWZ hook: hourly tick for the ambient session
+PartOf=openjawz-hooks.target
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target openjawz-hooks.target

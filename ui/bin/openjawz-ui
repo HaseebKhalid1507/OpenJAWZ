@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# openjawz-ui: install the hotkey snippet + bar module, cache the terminal choice
+# usage: openjawz ui install|status
+# owner: openjawz-ui
+# ci: fast
+#
+# install: enable foot-server.socket if foot is present (socket-activated, free until the first summon),
+#          write $XDG_RUNTIME_DIR/openjawz/term, copy hyprland.conf/sway.conf to ~/.config/{hypr,sway}/openjawz.conf
+#          where absent, print the `source =` / `include` / waybar lines. Never edits hyprland.conf or waybar config.
+#          Exit 2 when no Wayland compositor config dir exists (stage: skip).
+set -euo pipefail
+_lib=${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh
+[ -r "$_lib" ] || _lib=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/openjawz.sh
+# shellcheck source=/dev/null
+. "$_lib"
+oj::paths
+export OJ_CMD=ui
+UI_SHARE=$OPENJAWZ_SHARE/ui
+[ -d "$UI_SHARE" ] || UI_SHARE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CFG=${XDG_CONFIG_HOME:-$HOME/.config}
+
+pick_term() {
+  if oj::have footclient && systemctl --user -q is-active foot-server.socket 2>/dev/null; then echo footclient
+  elif oj::have foot; then echo foot
+  elif oj::have kitty; then echo kitty
+  elif oj::have ghostty; then echo ghostty
+  else echo "${TERMINAL:-xterm}"; fi
+}
+
+cmd_install() {
+  local did=0
+  if oj::have foot && oj::have systemctl; then
+    if systemctl --user enable --now foot-server.socket >/dev/null 2>&1; then oj::log ok "foot-server.socket enabled (footclient summon ≈ 5 ms)"; else oj::log warn "foot-server.socket not available; plain foot will be used"; fi
+  fi
+  mkdir -p "$OPENJAWZ_RUN"; pick_term > "$OPENJAWZ_RUN/term"
+  oj::log ok "terminal: $(cat "$OPENJAWZ_RUN/term")"
+
+  if [ -d "$CFG/hypr" ]; then
+    did=1
+    [ -e "$CFG/hypr/openjawz.conf" ] || { cp "$UI_SHARE/hotkey/hyprland.conf" "$CFG/hypr/openjawz.conf"; oj::log ok "wrote $CFG/hypr/openjawz.conf"; }
+    grep -qs 'openjawz.conf' "$CFG/hypr/hyprland.conf" 2>/dev/null \
+      || oj::log warn "add to ~/.config/hypr/hyprland.conf:   source = ~/.config/hypr/openjawz.conf"
+  fi
+  if [ -d "$CFG/sway" ]; then
+    did=1
+    [ -e "$CFG/sway/openjawz.conf" ] || { cp "$UI_SHARE/hotkey/sway.conf" "$CFG/sway/openjawz.conf"; oj::log ok "wrote $CFG/sway/openjawz.conf"; }
+    grep -qs 'openjawz.conf' "$CFG/sway/config" 2>/dev/null \
+      || oj::log warn "add to ~/.config/sway/config:   include ~/.config/sway/openjawz.conf"
+  fi
+  if oj::have waybar; then
+    oj::log info "waybar: merge $UI_SHARE/bar/waybar-module.jsonc into your config and add \"custom/openjawz\" to a modules list; @import \"$UI_SHARE/bar/style.css\" for the state colours"
+  fi
+  [ "$did" = 1 ] || { oj::log info "no ~/.config/hypr or ~/.config/sway — hotkey snippet not installed"; exit 2; }
+}
+
+cmd_status() {
+  echo "terminal: $(cat "$OPENJAWZ_RUN/term" 2>/dev/null || echo "(not cached; run openjawz ui install)")"
+  oj::have systemctl && echo "foot-server.socket: $(systemctl --user is-active foot-server.socket 2>/dev/null || echo inactive)"
+  for f in "$CFG/hypr/openjawz.conf" "$CFG/sway/openjawz.conf"; do [ -e "$f" ] && echo "snippet: $f"; done
+  return 0
+}
+
+case ${1:-} in
+  install) cmd_install ;;
+  status) cmd_status ;;
+  -h|--help|help|'') sed -n '2,4p' "$0" | sed 's/^# //' ;;
+  *) sed -n '3p' "$0" | sed 's/^# //'; exit 2 ;;
+esac

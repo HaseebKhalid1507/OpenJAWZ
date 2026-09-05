@@ -1,0 +1,15 @@
+{
+  "name": "chronos",
+  "version": "0.1.0",
+  "description": "Injects the current time into LLM context before every user message. The model always knows when it is. \ud83d\udd50",
+  "author": "OpenJAWZ",
+  "extension": {
+    "runtime": "process",
+    "command": "python3",
+    "args": ["main.py"],
+    "permissions": ["privacy.llm_content"],
+    "hooks": [
+      { "hook": "before_message" }
+    ]
+  }
+}

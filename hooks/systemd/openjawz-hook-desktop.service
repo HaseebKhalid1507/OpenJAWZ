@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenJAWZ hook: desktop events (Hyprland socket2 / sway subscribe)
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ/blob/main/docs/hooks.md
+PartOf=graphical-session.target openjawz-hooks.target
+After=graphical-session.target openjawz-ambient.service
+ConditionEnvironment=WAYLAND_DISPLAY
+# idle: socat 4.8 MB + bash 4 MB (Hyprland) / swaymsg + jq + bash ≈ 9 MB (sway)
+
+[Service]
+ExecStart=/usr/lib/openjawz/hooks/desktop-events
+Restart=on-failure
+RestartSec=2
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target openjawz-hooks.target

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# openjawz hook: notify (in) — every org.freedesktop.Notifications.Notify on the session bus → "notification: app=… summary=… body=…"
+# Works with any notification daemon (mako, dunst, swaync, …): we watch the bus, not the daemon. Idle: dbus-monitor 2.5 MB + bash 4 MB.
+# Our own toasts (app OpenJAWZ) are skipped so the ambient session never hears itself.
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init notify
+command -v dbus-monitor >/dev/null || bridge::skip "dbus-monitor not installed"
+[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus" ] || bridge::skip "no session bus"
+
+# dbus-monitor prints a Notify call as:
+#   method call … interface=org.freedesktop.Notifications; member=Notify
+#      string "app_name"
+#      uint32 replaces_id
+#      string "icon"
+#      string "summary"
+#      string "body"
+# The awk state machine collects the four strings after a Notify header and emits one TSV line.
+notify::awk() {
+  exec awk '
+    /member=Notify$/ { n=0; inmsg=1; next }
+    inmsg && /^   string "/ {
+      s=$0; sub(/^   string "/, "", s); sub(/"$/, "", s); gsub(/\t/, " ", s)
+      f[n++]=s
+      if (n==4) { print f[0] "\t" f[2] "\t" f[3]; inmsg=0; fflush() }
+      next
+    }
+    inmsg && /^(method|signal|error)/ { inmsg=0 }
+  '
+}
+
+notify::parse() {
+  local app summary body
+  while IFS=$'\t' read -r app summary body; do
+    [ "$app" = OpenJAWZ ] && continue
+    body=${body//$'\n'/ }
+    [ "${#body}" -gt 160 ] && body="${body:0:157}…"
+    bridge::event notification low "app=$app" "summary=$summary" "body=$body"
+  done
+}
+
+if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
+  notify::awk < "$OPENJAWZ_HOOK_REPLAY" | notify::parse
+else
+  notify::parse < <(dbus-monitor --session "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" | notify::awk)
+fi

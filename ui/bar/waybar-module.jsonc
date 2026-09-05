@@ -1,0 +1,16 @@
+// OpenJAWZ Waybar module. Merge into ~/.config/waybar/config.jsonc and add "custom/openjawz" to a modules list.
+// Refresh instantly from anywhere with:  pkill -RTMIN+8 waybar
+{
+  "custom/openjawz": {
+    "exec": "/usr/lib/openjawz/ui/waybar-status",
+    "return-type": "json",
+    "interval": 10,
+    "signal": 8,
+    "format": "{icon} {text}",
+    "format-icons": { "idle": "", "busy": "", "parked": "", "off": "" },
+    "on-click": "openjawz summon",
+    "on-click-right": "openjawz summon --new",
+    "exec-on-event": true,
+    "tooltip": true
+  }
+}

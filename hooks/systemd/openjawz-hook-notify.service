@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenJAWZ hook: desktop notifications in (session bus Notify → ambient)
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ/blob/main/docs/hooks.md
+PartOf=graphical-session.target openjawz-hooks.target
+After=graphical-session.target openjawz-ambient.service
+ConditionEnvironment=WAYLAND_DISPLAY
+# idle: dbus-monitor 2.5 MB + bash 4 MB
+
+[Service]
+ExecStart=/usr/lib/openjawz/hooks/notify-events
+Restart=on-failure
+RestartSec=2
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target openjawz-hooks.target

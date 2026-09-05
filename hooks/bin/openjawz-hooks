@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# openjawz-hooks: OS→agent bridges — enable | disable | status | list | test | pause | resume
+# usage: openjawz hooks enable [name…] | disable [name…] | status | list | test <name> | pause [10m] | resume
+# owner: openjawz-hooks
+# ci: fast
+#
+# enable with no names = the set in $OPENJAWZ_HOOKS (profile.env), default "desktop,fs,notify,system,chronos".
+# Every hook is a systemd --user unit (openjawz-hook-<name>.service, chronos = a timer), grouped
+# under openjawz-hooks.target so one `systemctl --user stop openjawz-hooks.target` silences all.
+# test <name> runs the bridge in the foreground with OPENJAWZ_HOOK_DRY=1 (prints, never sends).
+set -euo pipefail
+_lib=${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh
+[ -r "$_lib" ] || _lib=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/openjawz.sh
+# shellcheck source=/dev/null
+. "$_lib"
+oj::paths
+export OJ_CMD=hooks
+
+ALL="desktop fs notify system chronos"
+WAYLAND="desktop notify"
+HOOKS_DIR=$OPENJAWZ_LIB/hooks
+[ -d "$HOOKS_DIR" ] || HOOKS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+TARGET=openjawz-hooks.target
+PAUSE_FILE=$OPENJAWZ_RUN/hooks.paused
+
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; exit "${1:-0}"; }
+
+unit_of() { case $1 in chronos) echo openjawz-chronos.timer ;; *) echo "openjawz-hook-$1.service" ;; esac; }
+known() { case " $ALL " in *" $1 "*) return 0 ;; esac; oj::log err "unknown hook: $1 (known: $ALL)"; return 1; }
+sc() { systemctl --user "$@"; }
+
+names_or_default() {
+  if [ $# -gt 0 ]; then echo "$@"; return; fi
+  local set=${OPENJAWZ_HOOKS-desktop,fs,notify,system,chronos}
+  echo "${set//,/ }"
+}
+
+check_units_installed() {
+  sc list-unit-files "$TARGET" 2>/dev/null | grep -q "$TARGET" && return 0
+  oj::log warn "hook units are not installed for this user manager (missing $TARGET)"
+  oj::log warn "package openjawz-hooks ships them to /usr/lib/systemd/user; run: systemctl --user daemon-reload"
+  return 2
+}
+
+graphical_warning() {
+  sc -q is-active graphical-session.target 2>/dev/null && return 0
+  oj::log warn "graphical-session.target is not active — the Wayland hooks (${WAYLAND// /, }) will not start until it is."
+  oj::log warn "Hyprland without uwsm: add to hyprland.conf →  exec-once = systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS && systemctl --user start hyprland-session.target"
+  oj::log warn "sway: exec systemctl --user import-environment WAYLAND_DISPLAY SWAYSOCK DBUS_SESSION_BUS_ADDRESS && systemctl --user start sway-session.target"
+}
+
+cmd_enable() {
+  local names n u rc=0
+  oj::have systemctl || { oj::log warn "no systemd --user here; hooks skipped"; exit 2; }
+  check_units_installed || exit 2
+  # shellcheck disable=SC2046
+  names=$(names_or_default "$@")
+  [ -n "$names" ] || { oj::log info "OPENJAWZ_HOOKS is empty for this profile; nothing enabled"; exit 0; }
+  sc enable "$TARGET" >/dev/null 2>&1 || true
+  for n in $names; do
+    known "$n" || { rc=1; continue; }
+    u=$(unit_of "$n")
+    if sc enable --now "$u" >/dev/null 2>&1; then
+      oj::log ok "hook $n: enabled ($u)"
+    else
+      oj::log err "hook $n: enable failed ($u)"; rc=1
+    fi
+  done
+  sc start "$TARGET" >/dev/null 2>&1 || true
+  [ -n "$(echo "$names" | grep -oE 'desktop|notify' || true)" ] && graphical_warning
+  exit $rc
+}
+
+cmd_disable() {
+  local names n u
+  oj::have systemctl || exit 0
+  names=$(names_or_default "$@")
+  for n in $names; do
+    known "$n" || continue
+    u=$(unit_of "$n")
+    sc disable --now "$u" >/dev/null 2>&1 || true
+    oj::log ok "hook $n: disabled"
+  done
+  [ $# -eq 0 ] && { sc disable --now "$TARGET" >/dev/null 2>&1 || true; }
+  exit 0
+}
+
+cmd_status() {
+  local n u state sub cond
+  if paused_left=$(paused_seconds); then echo "paused: ${paused_left}s left ($PAUSE_FILE)"; else echo "paused: no"; fi
+  if ! oj::have systemctl; then echo "systemd --user: absent"; exit 0; fi
+  printf '%-8s %-32s %-10s %s\n' hook unit state note
+  for n in $ALL; do
+    u=$(unit_of "$n")
+    state=$(sc show -p ActiveState --value "$u" 2>/dev/null || echo unknown)
+    sub=$(sc show -p SubState --value "$u" 2>/dev/null || true)
+    cond=$(sc show -p ConditionResult --value "$u" 2>/dev/null || true)
+    note=
+    [ "$cond" = no ] && note="condition failed (no WAYLAND_DISPLAY in the user manager)"
+    sc -q is-enabled "$u" 2>/dev/null || note="${note:-disabled}"
+    [ "$state" = failed ] && note="failed: journalctl --user -u $u"
+    printf '%-8s %-32s %-10s %s\n' "$n" "$u" "$state${sub:+/$sub}" "$note"
+  done
+  sc -q is-active graphical-session.target 2>/dev/null || echo "graphical-session.target: inactive (Wayland hooks cannot start; see: openjawz hooks enable)"
+}
+
+cmd_list() { for n in $ALL; do printf '%s\t%s\n' "$n" "$(unit_of "$n")"; done; }
+
+cmd_test() {
+  local n=${1:-}; [ -n "$n" ] || usage 2
+  known "$n" || exit 1
+  local script
+  case $n in chronos) script=$HOOKS_DIR/chronos/chronos-tick ;; *) script=$HOOKS_DIR/$n/$n-events ;; esac
+  [ -x "$script" ] || script=$HOOKS_DIR/$(basename "$script")   # installed layout is flat
+  [ -x "$script" ] || oj::die "bridge script not found for $n" 1
+  oj::log info "running $script with OPENJAWZ_HOOK_DRY=1 (Ctrl-C to stop)"
+  OPENJAWZ_HOOK_DRY=1 exec "$script"
+}
+
+paused_seconds() {
+  [ -e "$PAUSE_FILE" ] || return 1
+  local until now; until=$(cat "$PAUSE_FILE" 2>/dev/null || echo 0); now=$(date +%s)
+  [ "$until" -gt "$now" ] 2>/dev/null || { rm -f "$PAUSE_FILE"; return 1; }
+  echo $((until - now))
+}
+
+cmd_pause() {
+  local d=${1:-10m} secs
+  case $d in
+    *m) secs=$(( ${d%m} * 60 )) ;; *h) secs=$(( ${d%h} * 3600 )) ;; *s) secs=${d%s} ;; *) secs=$d ;;
+  esac
+  [ "$secs" -gt 0 ] 2>/dev/null || oj::die "bad duration: $d (use 10m, 1h, 90s)" 2
+  mkdir -p "$OPENJAWZ_RUN"
+  printf '%s\n' "$(( $(date +%s) + secs ))" > "$PAUSE_FILE"
+  oj::log ok "hooks paused for $d (bridges keep running, events are dropped)"
+}
+
+cmd_resume() { rm -f "$PAUSE_FILE"; oj::log ok "hooks resumed"; }
+
+case ${1:-} in
+  enable)  shift; cmd_enable "$@" ;;
+  disable) shift; cmd_disable "$@" ;;
+  status)  cmd_status ;;
+  list)    cmd_list ;;
+  test)    shift; cmd_test "$@" ;;
+  pause)   shift; cmd_pause "$@" ;;
+  resume)  cmd_resume ;;
+  -h|--help|help|'') usage 0 ;;
+  *) usage 2 ;;
+esac

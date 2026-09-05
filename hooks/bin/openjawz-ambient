@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# openjawz-ambient: the always-on session — ensure | id | status | send
+# usage: openjawz ambient ensure|id|status|send <text>
+# owner: openjawz-hooks
+# ci: fast
+#
+# ensure: daemon up → a live/parked session named "ambient" exists → its id cached.
+#   1. daemon: `synaps daemon status` or `systemctl --user start synaps-daemon.service` (≤ 10 s)
+#   2. live?   `daemon sessions --json | select(.name=="ambient")` → cache id, exit 0
+#   3. saved?  a journal named ambient in $SYNAPS_BASE_DIR/sessions → `attach --continue ambient`
+#   4. else    `attach --create --name ambient -s ambient-session.md` + one boot line
+#              (one turn = a journal exists = the session can park)
+#   The runtime (integration@07007af7+) names sessions at create, so `synaps send --session ambient`
+#   resolves at once; the id cache is for the bar and for `ambient status`, not for delivery.
+set -euo pipefail
+_lib=${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh
+[ -r "$_lib" ] || _lib=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/openjawz.sh
+# shellcheck source=/dev/null
+. "$_lib"
+oj::paths
+export OJ_CMD=ambient
+
+NAME=${OPENJAWZ_AMBIENT:-ambient}
+PROMPT=${OPENJAWZ_AMBIENT_PROMPT:-$OPENJAWZ_SHARE/hooks/ambient-session.md}
+[ -r "$PROMPT" ] || PROMPT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ambient-session.md
+IDFILE=$OPENJAWZ_STATE/ambient.id
+BOOT_LINE='Boot. Read your operating notes and wait for events.'
+
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; exit "${1:-0}"; }
+
+live_id() {
+  synaps daemon sessions --json 2>/dev/null \
+    | jq -r --arg n "$NAME" '.[] | select(.name==$n) | select(.lifecycle!="ending") | .id' | head -1
+}
+
+saved_journal() {
+  local d=$SYNAPS_BASE_DIR/sessions
+  [ -d "$d" ] || return 1
+  grep -lsE "\"name\": *\"$NAME\"" "$d"/*.json 2>/dev/null | head -1
+}
+
+daemon_up() {
+  oj::daemon_alive && return 0
+  if oj::have systemctl && systemctl --user list-unit-files synaps-daemon.service >/dev/null 2>&1; then
+    systemctl --user start synaps-daemon.service 2>/dev/null || true
+  else
+    synaps daemon --detach >/dev/null 2>&1 || true
+  fi
+  for _ in $(seq 1 20); do oj::daemon_alive && return 0; sleep 0.5; done
+  return 1
+}
+
+# parse "[attached <id> …" from the line client's output
+attached_id() { sed -nE 's/.*\[attached ([0-9]{8}-[0-9]{6}-[0-9a-f]{4}).*/\1/p' | head -1; }
+
+cache_id() { mkdir -p "$OPENJAWZ_STATE"; printf '%s\n' "$1" > "$IDFILE"; }
+
+cmd_ensure() {
+  daemon_up || oj::die "daemon did not come up (synaps daemon status)" 1
+  local id
+  id=$(live_id) || true
+  if [ -n "$id" ]; then cache_id "$id"; oj::log ok "ambient live: $id"; return 0; fi
+
+  local out
+  if saved_journal >/dev/null; then
+    # never --continue a live journal: the live check above ran first (and the runtime now mirrors anyway)
+    out=$(printf '' | timeout 40 synaps attach --continue "$NAME" --name "$NAME" 2>&1) || true
+    id=$(printf '%s\n' "$out" | attached_id)
+    [ -n "$id" ] || oj::log warn "continue failed: ${out##*$'\n'}"
+  fi
+  if [ -z "$id" ]; then
+    [ -r "$PROMPT" ] || oj::die "ambient prompt missing: $PROMPT" 1
+    out=$(printf '%s\n' "$BOOT_LINE" | timeout 60 synaps attach --create --name "$NAME" -s "$PROMPT" 2>&1) || true
+    id=$(printf '%s\n' "$out" | attached_id)
+    [ -n "$id" ] || oj::die "could not create the ambient session: ${out##*$'\n'}" 1
+  fi
+  cache_id "$id"
+  oj::log ok "ambient ensured: $id"
+}
+
+cmd_id() {
+  local id
+  id=$(live_id) || true
+  if [ -n "$id" ]; then cache_id "$id"; printf '%s\n' "$id"; return 0; fi
+  oj::ambient_id || { oj::log warn "no ambient session (run: openjawz ambient ensure)"; return 1; }
+}
+
+cmd_status() {
+  local id
+  id=$(oj::ambient_id 2>/dev/null || true)
+  if ! oj::daemon_alive; then echo "daemon: down"; echo "ambient: unknown${id:+ (cached $id)}"; return 1; fi
+  synaps daemon sessions --json 2>/dev/null \
+    | jq -r --arg n "$NAME" --arg id "$id" \
+        '.[] | select(.name==$n or .id==$id) | "ambient: \(.lifecycle)  id=\(.id)  clients=\(.clients)  journal=\(.journal_id)"' \
+    | grep . || { echo "ambient: absent${id:+ (cached $id is gone)}"; return 1; }
+}
+
+cmd_send() {
+  [ $# -ge 1 ] || usage 2
+  BRIDGE_NAME=ui
+  # shellcheck source=hooks/lib/bridge.sh
+  . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+    || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/bridge.sh"
+  bridge::init ui
+  bridge::emit message low "$*"
+}
+
+case ${1:-} in
+  ensure) cmd_ensure ;;
+  id)     cmd_id ;;
+  status) cmd_status ;;
+  send)   shift; cmd_send "$@" ;;
+  -h|--help|help|'') usage 0 ;;
+  *) usage 2 ;;
+esac

@@ -1,0 +1,5 @@
+# ~/.config/openjawz/watch.list — one root per line, optional ":depth" (default 3).
+# Never watch $HOME itself: one inotify watch per directory, ~1 KB kernel memory each.
+# Lines starting with # are ignored. ~ and $HOME expand.
+~/Projects:3
+~/Downloads:1

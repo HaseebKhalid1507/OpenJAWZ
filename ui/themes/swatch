@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""
+swatch — preview every SynapsCLI theme's chrome/canvas pair in-terminal.
+
+Colours are only judgeable ADJACENT, so this renders the real sandwich:
+chrome on the outside, conversation canvas inset, sample text on top —
+the same relationship the TUI draws. Beside each it prints the two numbers
+that actually matter: chrome/canvas contrast, and how much of the theme's
+saturation the canvas keeps.
+
+Why this exists: judging one colour tweak by rebuilding is
+  edit .rs -> rsync -> ~2m30s release build -> launch TUI -> /theme switch
+This is instant, and shows all 19 at once.
+
+Usage:
+  swatch                          preview current palette values
+  swatch --try blood:37,14,14     preview a candidate without editing
+  swatch --try blood:37,14,14 --try ice:15,24,35
+  swatch --repo /path/to/agent-runtime
+  swatch --sort contrast          worst separation first
+
+Exit status is 0 always — this is a viewer, not a gate. The Rust tests are
+the gate.
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import re
+import sys
+
+DEFAULT_REPO = os.environ.get("SYNAPS_REPO", ".")
+THEME_MOD = "crates/agent-tui/src/tui/theme/mod.rs"
+PALETTE_DIR = "crates/agent-tui/src/tui/theme/palettes"
+
+# Guardrails enforced by the Rust tests — mirrored here so the preview flags
+# the same things CI would, before you bother wiring values in.
+CONTRAST_MIN, CONTRAST_MAX = 1.05, 1.30
+SATURATION_MIN = 0.90
+
+RESET = "\x1b[0m"
+
+
+def bg(c):
+    return f"\x1b[48;2;{c[0]};{c[1]};{c[2]}m"
+
+
+def fg(c):
+    return f"\x1b[38;2;{c[0]};{c[1]};{c[2]}m"
+
+
+# ── colour maths ────────────────────────────────────────────────────────────
+
+def _lin(v: int) -> float:
+    v = v / 255.0
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+
+def luminance(c) -> float:
+    return 0.2126 * _lin(c[0]) + 0.7152 * _lin(c[1]) + 0.0722 * _lin(c[2])
+
+
+def contrast(a, b) -> float:
+    la, lb = luminance(a), luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def saturation(c) -> float:
+    hi, lo = max(c), min(c)
+    return 0.0 if hi == 0 else (hi - lo) / hi
+
+
+# ── palette parsing ─────────────────────────────────────────────────────────
+
+FIELDS = ("bg", "message_bg", "border", "muted", "text")
+
+
+def grab(text: str, field: str):
+    m = re.search(rf"\b{field}:\s*Color::Rgb\((\d+),\s*(\d+),\s*(\d+)\)", text)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def load(repo: str):
+    themes = []
+    mod = os.path.join(repo, THEME_MOD)
+    if not os.path.isfile(mod):
+        sys.exit(f"not a synaps checkout: {mod} missing")
+    src = open(mod, encoding="utf-8").read()
+    themes.append(("default", {f: grab(src, f) for f in FIELDS}))
+    for path in sorted(glob.glob(os.path.join(repo, PALETTE_DIR, "*.rs"))):
+        name = os.path.basename(path)[:-3]
+        if name == "mod":
+            continue
+        src = open(path, encoding="utf-8").read()
+        vals = {f: grab(src, f) for f in FIELDS}
+        if vals["bg"] and vals["message_bg"]:
+            themes.append((name.replace("_", "-"), vals))
+    return themes
+
+
+# ── rendering ───────────────────────────────────────────────────────────────
+
+CHROME_W, CANVAS_W = 6, 46
+SAMPLE = "  assistant  canvas over chrome  "
+
+
+def render(name, v, width_name):
+    chrome, canvas = v["bg"], v["message_bg"]
+    text = v.get("text") or v.get("muted") or (200, 200, 200)
+    border = v.get("border") or canvas
+
+    c = contrast(chrome, canvas)
+    sb = saturation(chrome)
+    kept = (saturation(canvas) / sb) if sb > 0.02 else 1.0
+
+    flags = []
+    if c < CONTRAST_MIN:
+        flags.append("FLAT")
+    if c > CONTRAST_MAX:
+        flags.append("BOXY")
+    if sb > 0.05 and kept < SATURATION_MIN:
+        flags.append("WASHED")
+    tag = ("  " + " ".join(flags)) if flags else ""
+
+    head = (
+        f"{name:<{width_name}}  "
+        f"chrome {str(chrome):<15} canvas {str(canvas):<15} "
+        f"contrast {c:5.3f}  sat {kept * 100:3.0f}%{tag}"
+    )
+
+    pad = " " * CHROME_W
+    body = (
+        bg(chrome) + pad + bg(canvas) + fg(border) + "\u250c"
+        + "\u2500" * (CANVAS_W - 2) + "\u2510" + bg(chrome) + pad + RESET
+    )
+    sample = SAMPLE[: CANVAS_W - 2].ljust(CANVAS_W - 2)
+    mid = (
+        bg(chrome) + pad + bg(canvas) + fg(border) + "\u2502"
+        + fg(text) + sample + fg(border) + "\u2502" + bg(chrome) + pad + RESET
+    )
+    foot = (
+        bg(chrome) + pad + bg(canvas) + fg(border) + "\u2514"
+        + "\u2500" * (CANVAS_W - 2) + "\u2518" + bg(chrome) + pad + RESET
+    )
+    return head, [body, mid, foot], flags
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--repo", default=DEFAULT_REPO)
+    ap.add_argument("--try", dest="tries", action="append", default=[],
+                    metavar="THEME:R,G,B",
+                    help="preview a candidate message_bg without editing files")
+    ap.add_argument("--sort", choices=("name", "contrast", "sat"), default="name")
+    args = ap.parse_args()
+
+    themes = load(args.repo)
+
+    overrides = {}
+    for t in args.tries:
+        try:
+            name, rgb = t.split(":", 1)
+            overrides[name.strip().replace("_", "-")] = tuple(
+                int(x) for x in rgb.split(",")
+            )
+        except Exception:
+            sys.exit(f"bad --try (want THEME:R,G,B): {t}")
+
+    for name, v in themes:
+        if name in overrides:
+            v["message_bg"] = overrides[name]
+
+    if args.sort == "contrast":
+        themes.sort(key=lambda kv: contrast(kv[1]["bg"], kv[1]["message_bg"]))
+    elif args.sort == "sat":
+        def keep(v):
+            s = saturation(v["bg"])
+            return (saturation(v["message_bg"]) / s) if s > 0.02 else 1.0
+        themes.sort(key=lambda kv: keep(kv[1]))
+
+    w = max(len(n) for n, _ in themes)
+    print()
+    print(f"  \x1b[1mSynaps theme canvas preview\x1b[0m   "
+          f"{len(themes)} themes   guardrails: contrast "
+          f"{CONTRAST_MIN}-{CONTRAST_MAX}, saturation >= {SATURATION_MIN:.0%}")
+    if overrides:
+        print(f"  overrides: {', '.join(f'{k}={v}' for k, v in overrides.items())}")
+    print()
+
+    bad = []
+    for name, v in themes:
+        head, rows, flags = render(name, v, w)
+        print("  " + head)
+        for r in rows:
+            print("  " + r)
+        print()
+        if flags:
+            bad.append((name, flags))
+
+    if bad:
+        print("  \x1b[1moutside guardrails:\x1b[0m")
+        for n, f in bad:
+            print(f"    {n:<{w}}  {' '.join(f)}")
+        print()
+        print("  FLAT   = separation imperceptible (contrast too low)")
+        print("  BOXY   = reads as a panel, not a surface (contrast too high)")
+        print("  WASHED = canvas lost the theme's colour, drifting to grey")
+    else:
+        print("  all themes inside guardrails")
+    print()
+
+
+if __name__ == "__main__":
+    main()

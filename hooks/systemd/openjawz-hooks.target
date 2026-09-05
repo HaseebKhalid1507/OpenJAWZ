@@ -1,0 +1,9 @@
+[Unit]
+Description=OpenJAWZ hooks (all enabled OS→agent bridges)
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ/blob/main/docs/hooks.md
+After=openjawz-ambient.service
+# `systemctl --user stop openjawz-hooks.target` stops every bridge (they are PartOf= this target);
+# `openjawz hooks enable <name>` adds a bridge to it.
+
+[Install]
+WantedBy=default.target

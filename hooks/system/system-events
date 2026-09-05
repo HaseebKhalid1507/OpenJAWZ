@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# openjawz hook: system — ONE dbus-monitor --system for NetworkManager StateChanged + login1 PrepareForSleep
+# (network up/down, suspend imminent, resume) + optional udev usb add/remove. Idle: dbus-monitor 2.6 MB + bash 4 MB
+# (+ udevadm 5.5 MB only with OPENJAWZ_HOOK_USB=1). `nmcli monitor` (13 MB, 5 threads) is deliberately not used.
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init system
+command -v dbus-monitor >/dev/null || bridge::skip "dbus-monitor not installed"
+[ -S /run/dbus/system_bus_socket ] || bridge::skip "no system bus"
+
+# NetworkManager NMState: 10 asleep 20 disconnected 30 disconnecting 40 connecting 50 local 60 site 70 global
+nm_state() {
+  case $1 in
+    10) echo asleep ;; 20) echo disconnected ;; 30) echo disconnecting ;; 40) echo connecting ;;
+    50) echo local-only ;; 60) echo site-only ;; 70) echo online ;; *) echo "state-$1" ;;
+  esac
+}
+
+active_connection() {
+  command -v nmcli >/dev/null || return 0
+  # real links only (wifi/ethernet/vpn), not bridges/docker/loopback; name may hold ':' → cut from the right
+  timeout 2 nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null \
+    | awk -F: '$(NF-1) ~ /wireless|ethernet|wireguard|vpn|gsm/ { print $(NF-1) "/" $NF }' | head -3 | paste -sd, -
+}
+
+system::awk() {
+  exec awk '
+    /member=StateChanged/ && /NetworkManager/ { want="net"; next }
+    /member=PrepareForSleep/               { want="sleep"; next }
+    want=="net"   && /^   uint32 /  { print "net\t" $2; want=""; fflush(); next }
+    want=="sleep" && /^   boolean / { print "sleep\t" $2; want=""; fflush(); next }
+    /^(signal|method|error)/ { want="" }
+  '
+}
+
+system::parse() {
+  local kind val
+  while IFS=$'\t' read -r kind val; do
+    case $kind in
+      net)
+        case $val in
+          70) bridge::event network medium "state=online" "connection=$(active_connection)" ;;
+          20) bridge::event network medium "state=disconnected" ;;
+          *)  bridge::event network low "state=$(nm_state "$val")" ;;
+        esac ;;
+      sleep)
+        if [ "$val" = true ]; then bridge::event sleep high "state=suspending"
+        else bridge::event resume medium "state=resumed" "connection=$(active_connection)"; fi ;;
+      usb)
+        bridge::event usb low "$val" ;;
+    esac
+  done
+}
+
+usb::monitor() {
+  # udevadm prints one KEY=VALUE block per event; coalesce interfaces of one device on ID_SERIAL within the bridge window
+  udevadm monitor --udev --subsystem-match=usb --property 2>/dev/null \
+    | awk '/^ACTION=/{a=$0;sub("ACTION=","",a)} /^ID_SERIAL=/{s=$0;sub("ID_SERIAL=","",s)} /^ID_MODEL=/{m=$0;sub("ID_MODEL=","",m)}
+           /^$/{ if (a!="" && s!="" && (a=="add"||a=="remove")) { print "usb\taction=" a " model=" m " serial=" s; fflush() } a="";s="";m="" }'
+}
+
+if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
+  system::awk < "$OPENJAWZ_HOOK_REPLAY" | system::parse
+  exit 0
+fi
+
+rules=("type='signal',sender='org.freedesktop.NetworkManager',interface='org.freedesktop.NetworkManager',member='StateChanged'"
+       "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'")
+if [ "${OPENJAWZ_HOOK_USB:-0}" = 1 ] && command -v udevadm >/dev/null; then
+  { dbus-monitor --system "${rules[@]}" | system::awk & usb::monitor & wait; } | system::parse
+else
+  system::parse < <(dbus-monitor --system "${rules[@]}" | system::awk)
+fi

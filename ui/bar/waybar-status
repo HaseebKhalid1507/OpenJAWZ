@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# openjawz-waybar-status: one JSON line for a Waybar custom module (sessions · lifecycle · owner · memory)
+# usage: waybar exec; also `openjawz waybar-status` for a manual look
+# owner: openjawz-ui
+# ci: fast
+#
+# Contract: {"text","alt","class":[…],"tooltip"} on one line. class ∈ off|parked|idle|busy (+ "pending" when
+# migrations wait, cached 60 s). NEVER touches the daemon socket while synaps-daemon.service is inactive —
+# a poll must not wake anything. Memory = `synaps status --memory --json --pid <daemon.pid>` (one tree,
+# correct totals; bare --memory counts the daemon once per session).
+set -uo pipefail
+_lib=${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh
+[ -r "$_lib" ] || _lib=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/openjawz.sh
+# shellcheck source=/dev/null
+. "$_lib"
+oj::paths
+
+out() { jq -cn --arg t "$1" --arg a "$2" --argjson c "$3" --arg tip "$4" '{text:$t,alt:$a,class:$c,tooltip:$tip}'; }
+
+pending_class() {
+  local cache=$OPENJAWZ_RUN/migrate.pending now
+  now=$(date +%s)
+  if [ ! -e "$cache" ] || [ $((now - $(stat -c %Y "$cache" 2>/dev/null || echo 0))) -gt 60 ]; then
+    mkdir -p "$OPENJAWZ_RUN"
+    if oj::have openjawz; then openjawz migrate --pending 2>/dev/null | grep -qv '^none' && echo 1 > "$cache" || echo 0 > "$cache"
+    else echo 0 > "$cache"; fi
+  fi
+  [ "$(cat "$cache" 2>/dev/null)" = 1 ] && echo ',"pending"' || true
+}
+
+unit_active=1
+if oj::have systemctl && systemctl --user list-unit-files synaps-daemon.service >/dev/null 2>&1; then
+  systemctl --user -q is-active synaps-daemon.service 2>/dev/null || unit_active=0
+elif [ ! -S "$SYNAPS_RUN/daemon.sock" ]; then
+  unit_active=0
+fi
+if [ "$unit_active" = 0 ]; then
+  out "" off "[\"off\"$(pending_class)]" "daemon off — summon starts it"; exit 0
+fi
+
+sessions=$(timeout 3 synaps daemon sessions --json 2>/dev/null) || sessions='[]'
+[ -n "$sessions" ] || sessions='[]'
+live=$(jq '[.[]|select(.lifecycle=="live")]|length' <<<"$sessions")
+parked=$(jq '[.[]|select(.lifecycle=="parked" or .lifecycle=="parking")]|length' <<<"$sessions")
+busy=$(jq '[.[]|select(.lifecycle=="live" and .clients>0 and .input_owner!=null)]|length' <<<"$sessions")
+
+mem=""
+pidf=$SYNAPS_RUN/daemon.pid
+if [ -r "$pidf" ]; then
+  kb=$(timeout 3 synaps status --memory --json --pid "$(cat "$pidf")" 2>/dev/null | jq -r '.totals.pss_kb // .totals.rss_kb // empty')
+  [ -n "$kb" ] && mem="$((kb / 1024))M"
+fi
+
+if   [ "$busy" -gt 0 ]; then state=busy
+elif [ "$live" -gt 0 ]; then state=idle
+elif [ "$parked" -gt 0 ]; then state=parked
+else state=idle; fi
+
+text="$live live · $parked parked${mem:+ · $mem}"
+tip=$(jq -r '.[] | "\(.id)  \(.lifecycle)  clients=\(.clients)  owner=\(.input_owner // "-")  \(.name // "")"' <<<"$sessions" | paste -sd '\r' -)
+[ -n "$tip" ] || tip="no sessions"
+out "$text" "$state" "[\"$state\"$(pending_class)]" "$tip"

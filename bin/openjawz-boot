@@ -50,7 +50,7 @@ fi
 h "Handoff"
 if [ -s "$A/handoff.md" ]; then cat "$A/handoff.md"; else echo "No active handoff."; fi
 
-if [ -s "$A/checkpoint.md" ] && ! grep -qiE 'session completed|no in-flight|^# Checkpoint — none' "$A/checkpoint.md"; then
+if [ -s "$A/checkpoint.md" ] && { grep -q UNCLEAN "$A/checkpoint.md" || ! tail -1 "$A/checkpoint.md" | grep -qiE 'completed|no in-flight|— none'; }; then
   h "⚠ Checkpoint — UNCLEAN SHUTDOWN (previous session did not run openjawz shutdown)"
   cat "$A/checkpoint.md"
 fi

@@ -13,10 +13,14 @@ Seven layers, bottom up. Each maps to one directory.
 ## Install and update
 
 ```
-curl … | bash            30 lines: verify Arch, install paru if missing, install openjawz-meta
+sh boot                  ~6.5 KB, sha256-verified download (not curl|bash): verify Arch,
+                         add the [openjawz] repo Include to /etc/pacman.conf, pacman -S openjawz-meta
+                         (a trap removes the repo line if anything below fails)
   → openjawz-meta        PKGBUILD: synaps-bin + daemon + sidecars + hooks + crew + ops + brain + ui
-  → openjawz install     staged, logged, idempotent: config → unit → hooks → crew → brain → identity form → first session
-  → openjawz update      lock → snapshot → pacman -Syu → openjawz-migrate → post-update hooks → restart check
+  → openjawz install     staged, logged, idempotent: config → unit → plugins → crew → brain →
+                         onboard → hooks → ambient → ui → migrate → doctor
+  → openjawz update      lock → brain backup → snapshot → pacman -Syu openjawz-meta →
+                         migrate → daemon reload → ambient → doctor
 ```
 
 The script is what a stranger types. The package is the truth. `migrations/` exists from the first commit so it never has to be retrofitted.

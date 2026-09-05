@@ -8,7 +8,7 @@ synaps --attach                 # the TUI attached to the daemon (--new: fresh s
 synaps attach --create          # the line client, same daemon, for scripts and non-TTY shells
 openjawz boot                   # the agent runs this; you can too — Identity → Work → World
 openjawz checkpoint "…"         # every ~10 exchanges; --append for concurrent sessions; --clear
-openjawz shutdown               # the 7-step checklist, verified first, written last; refuses if the brief/handoff/journal are missing
+openjawz shutdown               # the 7-step core checklist (steps 1–7; +8 brain-extract and +9 backup when axel/backup are present), verified first, written last; refuses if the brief/handoff/journal are missing
 openjawz shutdown --no-handoff  # nothing in flight
 ```
 What the agent writes and where:
@@ -28,7 +28,7 @@ All of these are **sacred**: subagents never write them, destructive tests run o
 ```bash
 openjawz tasks add "Fix the build" -p high -c work --deadline 2026-09-12
 openjawz tasks list | today | due | search "build" | history
-openjawz tasks done 3 | update 3 --status in-progress | subtask 3 "write the test"
+openjawz tasks done 3 | update 3 --status in-progress | subtask 3 add "write the test"
 ```
 Same `tasks.json` the agent's native task tools use (`synaps-tasks` plugin) — edit from either side.
 
@@ -45,7 +45,7 @@ Playbooks in `/usr/share/openjawz/crew/playbooks/` are the fixed patterns — sa
 "review this", "debug this", "security audit ./project", "quick recon on Y", "build feature Z" and the agent loads the
 matching one. Parallel phases coordinate through `openjawz comms` (a local SQLite board):
 ```bash
-openjawz comms channels | read <channel> | unread
+openjawz comms channels | read <channel> [--as <agent>] | unread <channel> --as <agent>
 ```
 
 ## The brain

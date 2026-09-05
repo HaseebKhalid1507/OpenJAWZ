@@ -1,4 +1,4 @@
-# OpenJAWZ v0.1.0 — status
+# OpenJAWZ v0.1.0rc1 — status
 
 Integration pass on `main` (A + B + C merged), tests run on the build box against the Synaps
 `integration@07007af7` tarball (`synaps 0.9.0` reporting; the `0.9.1rc1` tag is P-R1, see below).
@@ -9,9 +9,12 @@ Integration pass on `main` (A + B + C merged), tests run on the build box agains
 |---|---|---|---|
 | `tests/grep-guard` | fast | **PASS** | 0.1 s |
 | `tests/lint` | fast | **PASS** | 6.5 s |
-| `tests/pkg` | fast | **PASS** (namcap on built packages: 0 errors) | 0.1 s |
+| `tests/pkg` | fast | **PASS** (namcap on PKGBUILD sources: no `E:`; `openjawz-keyring` carries a known built-package `E` until key material lands — see below) | 0.1 s |
 | `tests/templates` | fast | **PASS** | 0.1 s |
 | `tests/tools` | fast | **PASS** | 1.2 s |
+| `tests/brain` | fast | **PASS** — seeded secret memory DELETED + logged, benign one survives | <1 s |
+| `tests/migrate` | fast | **PASS** — idempotent runner; child takes its own per-name lock under update | 1 s |
+| `tests/hook-filter` | fast | **PASS** — secret-shaped text never leaves a bridge; broken filter fails CLOSED | <1 s |
 | `tests/hooks` | container | **PASS** — event delivered, ambient live (delivery leg; toast leg by `openjawz notify` directly) | 104 s |
 | `tests/install-smoke desktop` | container | **PASS** — boot → daemon → doctor no red → attached in **21 s** (8 s / 34 s on reruns), warm mirror | 200 s wall incl. image prep |
 | `tests/install-smoke vm` | container | **PASS** — 34 s | — |
@@ -59,22 +62,22 @@ From the three handoffs and PLAN §9:
   but unexercised; `tests/hooks/sway-headless.sh` written, not executed in a container; memprof `gates.sh`
   real run on the hardware box; quickshell note; hotkey timing on real Hyprland.
 - **C**: tools batch 2 (toolmake, tools-doc, maintain, backup, yt, web, tracker); the 12 lifted skills
-  (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`; whiptail fallback for onboard.
+  (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`.
 - Derivative-distro matrix entry (`ID_LIKE=arch` os-release override in the smoke).
-- Gauntlet round 2 (round 1: see "Gauntlet" below) → `docs/gauntlet/summary.md` once committed.
+- Gauntlet round 2 (round 1: see "Gauntlet" below) → summarised in `docs/gauntlet/summary.md` (committed).
 
 ## Gauntlet
 
-Playbook: `crew/playbooks/gauntlet.md`. **Round 1 has run** (five adversaries — Stranger, Packager, Auditor,
-Architect, Reader — on the A+B+C merge). Verdict: **NO-SHIP**, findings split into three fix scopes
+Playbook: `crew/playbooks/gauntlet.md`. **Round 1 has run** (six adversaries — Stranger, Packager, Auditor,
+Architect, Reader, Operator — on the A+B+C merge). Verdict: **NO-SHIP**, findings split into three fix scopes
 (A: packaging/boot, B: daemon/hooks/ui, C: docs truth + brain + ops) and landed as `fix1/{a,b,c}`. The
 round files themselves are not in this tree; the fixes are the commits and this section is the summary.
 Scope C, this branch: README says local mode is the only install path; no `openjawz deck` verb is
 claimed; architecture/spectrum describe the shipped `Type=simple` daemon; memory gates are stated as
 bench-box-only; `brain scan` really scans (Python `sqlite3` REGEXP, fixture-DB test); `brain purge`;
 `umask 077` on brain backups; one axel spawn story; onboarding counted honestly; OP.md lists only verbs
-that exist; `openjawz shutdown` verifies before it writes. Round 2 has not run. `docs/gauntlet/` does
-not exist until a round's merged file is committed.
+that exist; `openjawz shutdown` verifies before it writes. The merged round summary is committed at
+`docs/gauntlet/summary.md`.
 
 ## Synaps PRs still needed (PLAN §7)
 

@@ -15,7 +15,7 @@ openjawz brain status        # path, size, axel stats, last consolidation, backu
 openjawz brain backup        # sqlite .backup → tar.zst (0600) in ~/.local/state/openjawz/brain-backups (keep 3); --quick = plain tar
 openjawz brain consolidate   # reindex → strengthen → reorganize → prune, then `brain scan`
 openjawz brain scan          # secret scan: every pattern in secret-patterns.txt against stored memories; hits are DELETED and logged
-openjawz brain purge [--yes] # remove the .r8 (+ .hnsw, sources.toml) after asking — what `openjawz uninstall --purge` calls
+openjawz brain purge [--yes] # remove the .r8 (+ .hnsw, sources.toml) after asking — a superset is also removed directly by `openjawz uninstall --purge` (which `rm -rf`s the axel dir; it does not shell out to `brain purge`)
 ```
 `scan` runs the patterns through python's `sqlite3` module with a `REGEXP` function (the `sqlite3` CLI has none);
 a hit is deleted with `axel forget` when this axel has it, otherwise with a plain `DELETE`, and one line per row

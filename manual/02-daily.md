@@ -28,7 +28,7 @@ All of these are **sacred**: subagents never write them, destructive tests run o
 ```bash
 openjawz tasks add "Fix the build" -p high -c work --deadline 2026-09-12
 openjawz tasks list | today | due | search "build" | history
-openjawz tasks done 3 | update 3 --status in-progress | subtask 3 "write the test"
+openjawz tasks done 3 | update 3 --status in-progress | subtask 3 add "write the test"
 ```
 Same `tasks.json` the agent's native task tools use (`synaps-tasks` plugin) — edit from either side.
 

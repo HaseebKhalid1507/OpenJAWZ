@@ -1,7 +1,7 @@
 {
   "name": "axel",
   "version": "0.1.0",
-  "description": "The brain \u2014 ambient search, memory, recall. One .r8 per user; the daemon is the single writer.",
+  "description": "The brain \u2014 ambient search, memory, recall. One .r8 per user, shared with the axel MCP server (mcp.json) — one brain file, two axel processes; SQLite serialises writes.",
   "author": "OpenJAWZ contributors",
   "license": "MIT",
   "extension": {

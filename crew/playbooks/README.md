@@ -108,7 +108,7 @@ openjawz comms post research-recon researcher "Found critical vulnerability in a
 openjawz comms post research-recon implementer "Need more details on API endpoints" --to researcher --type question
 
 # Signal completion
-openjawz comms post research-recon researcher "Recon phase complete, 15 findings documented" --type completion
+openjawz comms post research-recon researcher "Recon phase complete, 15 findings documented" --type alert
 ```
 
 ---

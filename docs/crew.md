@@ -37,5 +37,5 @@ round). `README.md` is the format spec. There is no playbook CLI in v0.1; the or
 
 ## Comms (`crew/tools/comms`)
 Parallel phases with 3+ agents coordinate through a local SQLite board (`$OPENJAWZ_DATA/comms.db`):
-`openjawz comms post <channel> <from> "msg" [--to role] [--type finding|question|completion]`, `read`, `unread`,
+`openjawz comms post <channel> <from> "msg" [--to role] [--type finding|question|answer|alert]`, `read`, `unread`,
 `channels`, `archive`. Nothing leaves the machine.

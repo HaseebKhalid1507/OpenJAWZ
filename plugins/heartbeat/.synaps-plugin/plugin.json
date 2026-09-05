@@ -1,0 +1,29 @@
+{
+  "name": "heartbeat",
+  "version": "0.1.0",
+  "description": "Keeps the Anthropic prompt cache warm during idle gaps — fires a tiny keepalive turn before the 5-minute TTL expires, so you never pay a full cache re-write. ❤️",
+  "author": "OpenJAWZ contributors",
+  "extension": {
+    "runtime": "process",
+    "command": "python3",
+    "args": [
+      "main.py"
+    ],
+    "permissions": [
+      "session.lifecycle",
+      "privacy.llm_content"
+    ],
+    "hooks": [
+      {
+        "hook": "on_session_start"
+      },
+      {
+        "hook": "on_message_complete"
+      },
+      {
+        "hook": "on_session_end"
+      }
+    ]
+  },
+  "license": "MIT"
+}

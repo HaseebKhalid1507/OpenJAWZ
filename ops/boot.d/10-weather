@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# boot.d/10-weather — one line of current conditions for the boot briefing's World section.
+# Uses the weather-lens plugin's stdlib fetcher when present; silent (exit 0, no output) otherwise.
+# Location: $OPENJAWZ_WEATHER_LOCATION (identity/profile env) — no default, no guessing.
+loc="${OPENJAWZ_WEATHER_LOCATION:-}"
+[ -n "$loc" ] || exit 0
+for d in "${OPENJAWZ_SHARE:-/usr/share/openjawz}/plugins/weather-lens" "${SYNAPS_BASE_DIR:-$HOME/.synaps-cli}/plugins/weather-lens"; do
+  [ -f "$d/main.py" ] || continue
+  timeout 6 python3 - "$d" "$loc" <<'PY' 2>/dev/null && exit 0
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location("wl", sys.argv[1] + "/main.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.get_weather(sys.argv[2]))
+PY
+done
+exit 0

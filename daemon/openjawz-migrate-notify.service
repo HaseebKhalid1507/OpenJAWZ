@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenJAWZ: notify about pending migrations at login
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ
+After=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/openjawz/bin/openjawz-migrate --notify
+
+[Install]
+WantedBy=graphical-session.target

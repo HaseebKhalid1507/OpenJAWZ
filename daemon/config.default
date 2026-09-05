@@ -1,0 +1,27 @@
+# ~/.synaps-cli/config — seeded by `openjawz install` (only if absent). Flat key = value; not TOML.
+# Secrets NEVER live here. Credentials: `synaps login`, or env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, …),
+# or `provider.<name> = …` lines you add yourself in this file (0600).
+
+# ── daemon-first ─────────────────────────────────────────────────────────────
+progressive_tool_disclosure = true
+events.auto_turn_cap = 5
+session_persistence = json
+
+# ── identity (openjawz onboard fills these) ─────────────────────────────────
+agent_name = {{AGENT_NAME}}
+identity = {{IDENTITY}}
+
+# ── model ────────────────────────────────────────────────────────────────────
+model = {{MODEL}}
+thinking = medium
+cache_ttl = 1h
+
+# ── client / tui ─────────────────────────────────────────────────────────────
+theme = default
+tui_background_opaque = opaque
+
+# ── plugins ──────────────────────────────────────────────────────────────────
+disabled_plugins = heartbeat
+
+# ── misc ─────────────────────────────────────────────────────────────────────
+telemetry = basic

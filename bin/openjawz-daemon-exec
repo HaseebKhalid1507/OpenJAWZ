@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# openjawz-daemon-exec: ExecStart shim — synaps daemon --foreground [--idle-exit N]
+# usage: (systemd only) synaps-daemon.service
+# owner: openjawz-daemon
+set -euo pipefail
+args=(daemon --foreground)
+[ "${OPENJAWZ_IDLE_EXIT:-0}" != 0 ] && args+=(--idle-exit "$OPENJAWZ_IDLE_EXIT")
+[ -n "${OPENJAWZ_SYNAPS_PROFILE:-}" ] && args=(--profile "$OPENJAWZ_SYNAPS_PROFILE" "${args[@]}")
+exec /usr/bin/synaps "${args[@]}"

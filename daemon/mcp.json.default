@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "axel": { "command": "axel", "args": ["mcp"], "shared": true }
+  }
+}

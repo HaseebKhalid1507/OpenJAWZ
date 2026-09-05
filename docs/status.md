@@ -12,6 +12,9 @@ Integration pass on `main` (A + B + C merged), tests run on the build box agains
 | `tests/pkg` | fast | **PASS** (namcap on PKGBUILD sources: no `E:`; `openjawz-keyring` carries a known built-package `E` until key material lands — see below) | 0.1 s |
 | `tests/templates` | fast | **PASS** | 0.1 s |
 | `tests/tools` | fast | **PASS** | 1.2 s |
+| `tests/brain` | fast | **PASS** — seeded secret memory DELETED + logged, benign one survives | <1 s |
+| `tests/migrate` | fast | **PASS** — idempotent runner; child takes its own per-name lock under update | 1 s |
+| `tests/hook-filter` | fast | **PASS** — secret-shaped text never leaves a bridge; broken filter fails CLOSED | <1 s |
 | `tests/hooks` | container | **PASS** — event delivered, ambient live (delivery leg; toast leg by `openjawz notify` directly) | 104 s |
 | `tests/install-smoke desktop` | container | **PASS** — boot → daemon → doctor no red → attached in **21 s** (8 s / 34 s on reruns), warm mirror | 200 s wall incl. image prep |
 | `tests/install-smoke vm` | container | **PASS** — 34 s | — |

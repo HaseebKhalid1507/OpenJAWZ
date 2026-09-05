@@ -16,7 +16,7 @@ sha256sum -c boot.sha256 && sh boot
 
 Two files, one checksum, then run it. (A short domain will front this once it is live; the raw URL is the source of truth.)
 
-**Not live yet.** v0.1.0 has no published repo, no release keyring, and no signed packages: the keyring
+**Not live yet.** v0.1.0rc1 has no published repo, no release keyring, and no signed packages: the keyring
 checksum in `boot` is a placeholder and the public path stops there on purpose (it fails closed in about a
 second and writes nothing under `/etc`). Today the only path that installs is local mode.
 
@@ -62,7 +62,7 @@ Every agent CLI you've used spawns a full engine, its own memory, and its own si
 | engine-per-terminal | 40–260 MB |
 | OpenJAWZ (`synaps --attach`, one more TUI on the daemon) | **~2 MB** |
 
-The numbers are the Synaps daemon-mode numbers, measured there (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). The scripts to re-measure are in `tests/memprof/`; the gates are a bench-box run, not CI, and v0.1.0 has not re-run them in this tree. Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Two spellings, on purpose: `synaps --attach [--new]` is the TUI on the daemon (the hotkey, you); `synaps attach --create` is the line client (scripts, the smoke, the ambient session). Bare `synaps` is the in-process engine. Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
+The numbers are the Synaps daemon-mode numbers, measured there (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). The scripts to re-measure are in `tests/memprof/`; the gates are a bench-box run, not CI, and v0.1.0rc1 has not re-run them in this tree. Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Two spellings, on purpose: `synaps --attach [--new]` is the TUI on the daemon (the hotkey, you); `synaps attach --create` is the line client (scripts, the smoke, the ambient session). Bare `synaps` is the in-process engine. Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
 
 ## The spectrum
 
@@ -70,7 +70,7 @@ The numbers are the Synaps daemon-mode numbers, measured there (its memory-budge
 |---|---|
 | desktop | daemon + everything, desktop hooks, bar widget |
 | laptop | same; suspend/resume reach the ambient session as events, sessions park on the same 60 s grace |
-| cyberdeck | **client only** — daemon on your desktop. v0.1.0 ships the profile (no local daemon, no hooks) and nothing else: you forward the daemon's socket over SSH yourself (`deck/README.md` has the two lines). No `openjawz deck` verb exists yet; native `--tcp` + broker token is a runtime PR. |
+| cyberdeck | **client only** — daemon on your desktop. v0.1.0rc1 ships the profile (no local daemon, no hooks) and nothing else: you forward the daemon's socket over SSH yourself (`deck/README.md` has the two lines). No `openjawz deck` verb exists yet; native `--tcp` + broker token is a runtime PR. |
 | VM / server | the daemon *is* the machine's agent; a browser is a client |
 
 Same binary. Same brain. Two windows into one mind.
@@ -107,14 +107,14 @@ Signed repo (`SigLevel = Required` on the public path — not yet published; loc
 
 ## Status
 
-**v0.1.0 — passes install-smoke in `archlinux:latest` via `boot --local`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). No public repo yet — see "The 10-minute promise". Full table, what is yellow, and what slipped: `docs/status.md`.
+**v0.1.0rc1 — passes install-smoke in `archlinux:latest` via `boot --local`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). No public repo yet — see "The 10-minute promise". Full table, what is yellow, and what slipped: `docs/status.md`.
 
 What `openjawz doctor` shows yellow on a fresh box, honestly:
 
 - **brain absent** — until an `axel` release tarball exists, `axel-bin` cannot be built from a URL; the brain rows stay yellow and `openjawz brain init` skips.
 - **desktop / notify hooks** — condition-skipped until a Wayland session exports `WAYLAND_DISPLAY` to systemd (`doctor` prints the exec-once line).
 - **fs hook** — exits clean if none of `watch.list` exists yet (`~/Projects`, `~/Downloads`).
-- **repo unsigned** — always, in v0.1.0: local mode is the only mode. The public repo will be `SigLevel = Required`.
+- **repo unsigned** — always, in v0.1.0rc1: local mode is the only mode. The public repo will be `SigLevel = Required`.
 
 Gauntlet: round 1 ran and returned NO-SHIP; the fixes are on `main` and `docs/status.md` ("Gauntlet") summarises what changed; a fuller summary lives in `docs/gauntlet/summary.md`.
 

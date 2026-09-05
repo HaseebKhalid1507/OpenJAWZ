@@ -4,7 +4,7 @@
 
 ## Why not socket activation
 
-The runtime binds its own socket and does not read `LISTEN_FDS`; a `.socket` unit would race that bind. So there is **no `synaps-daemon.socket`** in v0.1. The daemon stays resident; *sessions* park to ~2 MB when nobody is watching. Socket activation + idle-exit land with the runtime PR listed in `docs/architecture.md`.
+The runtime binds its own socket and does not read `LISTEN_FDS`; a `.socket` unit would race that bind. So there is **no `synaps-daemon.socket`** in v0.1. The daemon stays resident; *sessions* park to ~2 MB when nobody is watching. `--idle-exit` already exists in the runtime (the vm profile uses it); socket activation is the runtime PR listed in `docs/architecture.md`, and only after it can desktop/laptop idle-exit without losing the ambient session.
 
 ## The unit, and why each line
 

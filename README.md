@@ -32,7 +32,7 @@ Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs packages, not a dis
 
 When it's done you have:
 
-- **a daemon** — `synaps daemon` as a systemd *user* service (`synaps-daemon.service`, `Type=simple`). Sessions park to ~2 MB when nobody is watching; the daemon itself stays resident in v0.1. No socket activation yet — the unit is `Type=simple`; the daemon auto-spawns on first attach if it is not running. Socket activation + idle-exit land with the runtime PR (see `docs/architecture.md`, "What the runtime still owes us").
+- **a daemon** — `synaps daemon` as a systemd *user* service (`synaps-daemon.service`, `Type=simple`). Sessions park to ~2 MB when nobody is watching; the daemon itself stays resident on desktop/laptop (the vm profile idle-exits after 30 min). No socket activation yet — the runtime auto-spawns the daemon on first attach if it is not running; the `.socket` unit lands with a runtime PR (`docs/architecture.md`, "What the runtime still owes us").
 - **a brain** — persistent memory with provenance, one writer, every session reads it. Requires `axel`; `openjawz doctor` tells you if it is missing.
 - **a crew** — planner / implementer / reviewer / tester (14 roles) with a build discipline that measures before it designs.
 - **hooks** — your desktop, filesystem, notifications, and clock feed an always-on *ambient* session that costs ~2 MB while nothing is happening.
@@ -54,7 +54,7 @@ Measured, reproducible — the scripts are in `tests/memprof/`; the numbers are 
 | where | what runs there |
 |---|---|
 | desktop | daemon + everything, desktop hooks, bar widget |
-| laptop | same, sessions park on lid-close |
+| laptop | same; suspend/resume reach the ambient session as events, sessions park on the same 60 s grace |
 | cyberdeck | **client only** — daemon on your desktop. v0.1.0 ships the profile (no local daemon, no hooks) and nothing else: you forward the daemon's socket over SSH yourself (`deck/README.md` has the two lines). No `openjawz deck` verb exists yet; native `--tcp` + broker token is a runtime PR. |
 | VM / server | the daemon *is* the machine's agent; a browser is a client |
 

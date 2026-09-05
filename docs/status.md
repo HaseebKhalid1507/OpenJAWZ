@@ -65,8 +65,8 @@ From the three handoffs and PLAN §9:
 
 ## Gauntlet
 
-Playbook: `crew/playbooks/gauntlet.md`. **Round 1 has run** (five adversaries — Stranger, Packager, Auditor,
-Architect, Reader — on the A+B+C merge). Verdict: **NO-SHIP**, findings split into three fix scopes
+Playbook: `crew/playbooks/gauntlet.md`. **Round 1 has run** (six adversaries — Stranger, Packager, Auditor,
+Architect, Reader, Operator — on the A+B+C merge). Verdict: **NO-SHIP**, findings split into three fix scopes
 (A: packaging/boot, B: daemon/hooks/ui, C: docs truth + brain + ops) and landed as `fix1/{a,b,c}`. The
 round files themselves are not in this tree; the fixes are the commits and this section is the summary.
 Scope C, this branch: README says local mode is the only install path; no `openjawz deck` verb is

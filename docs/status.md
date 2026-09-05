@@ -1,4 +1,4 @@
-# OpenJAWZ v0.1.0 — status
+# OpenJAWZ v0.1.0rc1 — status
 
 Integration pass on `main` (A + B + C merged), tests run on the build box against the Synaps
 `integration@07007af7` tarball (`synaps 0.9.0` reporting; the `0.9.1rc1` tag is P-R1, see below).

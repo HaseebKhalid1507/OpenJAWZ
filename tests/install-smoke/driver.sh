@@ -3,7 +3,7 @@
 set -uo pipefail
 P="$(cat /work/profile 2>/dev/null || echo desktop)"
 step() { echo; echo "## $* ($(date +%T))"; }
-finish() { echo "$1" > /work/result; exit 0; }
+finish() { chmod -R a+rwX /work 2>/dev/null; echo "$1" > /work/result; exit 0; }
 step prepare
 pacman -Syu --noconfirm --needed dbus sudo base-devel git >/dev/null || finish "prepare-failed"
 systemctl start dbus

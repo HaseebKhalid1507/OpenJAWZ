@@ -55,7 +55,7 @@ Measured, reproducible — the scripts are in `tests/memprof/`; the numbers are 
 |---|---|
 | desktop | daemon + everything, desktop hooks, bar widget |
 | laptop | same, sessions park on lid-close |
-| cyberdeck | **client only** — daemon on your desktop; v0.1 reaches it over an SSH-forwarded socket (`openjawz deck attach <host>`, one command). Native `--tcp` + broker token is a runtime PR. |
+| cyberdeck | **client only** — daemon on your desktop. v0.1.0 ships the profile (no local daemon, no hooks) and nothing else: you forward the daemon's socket over SSH yourself (`deck/README.md` has the two lines). No `openjawz deck` verb exists yet; native `--tcp` + broker token is a runtime PR. |
 | VM / server | the daemon *is* the machine's agent; a browser is a client |
 
 Same binary. Same brain. Two windows into one mind.

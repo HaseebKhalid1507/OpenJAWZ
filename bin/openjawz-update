@@ -82,7 +82,11 @@ sudo="$(oj::sudo)"
 if [ -n "$local_dir" ]; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   cp /etc/pacman.conf "$tmp/pacman.conf"
-  printf '\n[openjawz]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$local_dir" >> "$tmp/pacman.conf"
+  # pacman>=7 downloads as user alpm: stage a world-readable copy (a 0700 $HOME is unreadable to it); same as boot --local
+  stage=$(mktemp -d /tmp/openjawz-repo.XXXXXX); chmod 755 "$stage"; cp -r "$local_dir"/. "$stage"/; chmod -R a+rX "$stage"
+  trap 'rm -rf "$tmp" "$stage"' EXIT
+  oj::run $sudo rm -f /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig   # signed→local: stale .sig breaks -Sy
+  printf '\n[openjawz]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$stage" >> "$tmp/pacman.conf"
   # a stale signed db from an earlier signed repo would poison the unsigned sync
   oj::run $sudo rm -f /var/lib/pacman/sync/openjawz.db /var/lib/pacman/sync/openjawz.files /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig
   oj::run $sudo pacman --config "$tmp/pacman.conf" -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta

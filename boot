@@ -66,6 +66,7 @@ main() {
     printf '\n[openjawz]\nSigLevel = Optional TrustAll\nServer = %s\n' "$repo" >>"$tmp/pacman.conf"
     ask "$pkg" "$dir"
     run $SUDO rm -f /var/lib/pacman/sync/openjawz.db /var/lib/pacman/sync/openjawz.files
+    run $SUDO rm -f /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig   # signed→local: a stale sync .sig breaks -Sy
     run $SUDO pacman --config "$tmp/pacman.conf" -Syu --needed --noconfirm "$pkg"
   else
     # 4b. trust root: keyring pinned + checksummed HERE (bump on rotation)

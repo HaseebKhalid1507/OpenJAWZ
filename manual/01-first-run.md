@@ -8,7 +8,7 @@ Every claim has a command next to it. If a command does not do what this page sa
 ```bash
 openjawz onboard
 ```
-Seven questions, under a minute, every one with a default. Nothing here asks for an API key.
+Nine prompts — seven identity questions, then memory policy and model — under a minute, every one with a default. Nothing here asks for an API key.
 
 | # | question | lands in |
 |---|---|---|
@@ -19,8 +19,8 @@ Seven questions, under a minute, every one with a default. Nothing here asks for
 | 5 | What should it push back on? | `PUSHBACK` |
 | 6 | What should it never do? | `NEVER` |
 | 7 | Where is this machine in the spectrum? (desktop / laptop / deck / vm — pre-selected) | `PROFILE` |
-| + | Memory policy: everything except secrets / work only / ask each session | `MEMORY_MODE` |
-| + | Model (`provider/model`) | `MODEL` |
+| 8 | Memory policy: everything except secrets / work only / ask each session | `MEMORY_MODE` |
+| 9 | Model (`provider/model`) | `MODEL` |
 
 Answers go to `~/.config/openjawz/identity.env` (mode 0600). From them the templates are rendered:
 

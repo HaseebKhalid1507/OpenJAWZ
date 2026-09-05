@@ -4,7 +4,7 @@
 # owner: openjawz-ops
 # ci: fast
 #
-# Seven questions, under a minute, every one with a default so `--yes` produces a working identity.
+# Nine prompts (seven identity questions + memory policy + model), under a minute, every one with a default so `--yes` produces a working identity.
 # No API keys are asked here — that is `synaps login`. Ends with `synaps daemon reload` because the
 # runtime caches `identity=` process-wide.
 set -euo pipefail

@@ -38,6 +38,12 @@ package() {
   bin="$(find "$srcdir" -type f -name axel -perm -u+x | head -1)"
   [[ -n "$bin" ]] || { echo "no axel binary in $_asset" >&2; return 1; }
   install -Dm755 "$bin" "$pkgdir/usr/bin/axel"
+  # version sanity: the sha256 gate pins WHICH bytes, not WHICH version — cross-check the binary's
+  # self-reported version against the pinned pkgver so a mislabelled tarball can't ship under a false pin.
+  # NON-FATAL (symmetry with synaps-bin / P-R1): turn into `return 1` once a real tagged release exists.
+  local _rv
+  _rv="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?(_?rc[0-9]+)?' | head -1 || true)"
+  [[ -z "$_rv" || "$_rv" == "$pkgver" ]] || warning "axel binary self-reports %s but this package pins pkgver=%s — the repo label will not match the runtime" "$_rv" "$pkgver"
   local lic
   lic="$(find "$srcdir" -maxdepth 3 -type f -iname 'LICENSE*' | head -1)"
   [[ -n "$lic" ]] && install -Dm644 "$lic" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

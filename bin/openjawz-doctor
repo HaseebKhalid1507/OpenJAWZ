@@ -19,12 +19,12 @@ if oj::is_arch; then green "arch: $(. /etc/os-release; echo "$ID")"; else red "n
 
 # synaps
 if oj::have synaps; then
-  sv="$(synaps --version 2>/dev/null | awk '{print $NF}')"
+  sv="$(synaps --version 2>/dev/null | awk '{print $NF}' || true)"
   if synaps daemon --help 2>/dev/null | grep -q -- '--foreground'; then green "synaps $sv (daemon mode)"; else red "synaps $sv has no daemon mode — need >= 0.9.1rc1"; fi
 else red "synaps not on PATH"; fi
 
 # axel
-if oj::have axel; then green "axel $(axel --version 2>/dev/null | awk '{print $NF}')"; else yellow "brain absent: axel not installed (pacman -S axel-bin)"; fi
+if oj::have axel; then green "axel $(axel --version 2>/dev/null | awk '{print $NF}' || true)"; else yellow "brain absent: axel not installed (no axel release yet — see docs/status.md)"; fi
 
 # config
 cfg="$SYNAPS_BASE_DIR/config"
@@ -54,7 +54,7 @@ if systemctl --user --version >/dev/null 2>&1; then
   # ambient
   aid="$(oj::ambient_id || true)"
   if [ -n "$aid" ]; then
-    lc="$(synaps daemon sessions --json 2>/dev/null | jq -r --arg id "$aid" '.[]|select(.id==$id)|(.lifecycle // .state // "live")' 2>/dev/null | head -1)"
+    lc="$(synaps daemon sessions --json 2>/dev/null | jq -r --arg id "$aid" '.[]|select(.id==$id)|(.lifecycle // .state // "live")' 2>/dev/null | head -1 || true)"
     if [ -n "$lc" ]; then green "ambient session $aid ($lc)"; else yellow "ambient session $aid not live (openjawz ambient ensure)"; fi
   else yellow "no ambient session (openjawz ambient ensure)"; fi
   # graphical-session
@@ -82,11 +82,12 @@ else red "no systemd user session"; fi
 if [ -d "$OPENJAWZ_STATE/migrations" ]; then
   if compgen -G "$OPENJAWZ_STATE/migrations/*.running" >/dev/null; then red "migration did not finish: $(basename "$(ls "$OPENJAWZ_STATE"/migrations/*.running | head -1)" .running) (openjawz migrate --force|--skip)"; fi
   p="$(openjawz migrate --pending 2>/dev/null || echo none)"
-  if [ "$p" = none ]; then green "migrations: none pending"; else yellow "migrations pending: $(printf '%s' "$p" | wc -l) (openjawz migrate)"; fi
+  if [ "$p" = none ]; then green "migrations: none pending"; else yellow "migrations pending: $(printf '%s\n' "$p" | grep -c . || true) (openjawz migrate)"; fi
 else yellow "no migration state (openjawz install)"; fi
 
 # repo
-if [ -r /etc/pacman.d/openjawz.conf ]; then
+if [ -r "$OPENJAWZ_CONFIG/local-repo" ]; then yellow "repo: unsigned local ($(cat "$OPENJAWZ_CONFIG/local-repo")) — test mode (openjawz update --local DIR)"
+elif [ -r /etc/pacman.d/openjawz.conf ]; then
   if grep -q 'Include = /etc/pacman.d/openjawz.conf' /etc/pacman.conf; then
     if grep -Eq '^SigLevel\s*=\s*Required' /etc/pacman.d/openjawz.conf; then green "repo [openjawz] Include present, SigLevel Required"
     elif grep -q 'OPENJAWZ-LOCAL' /etc/pacman.d/openjawz.conf; then yellow "repo [openjawz] is a LOCAL UNSIGNED test repo"
@@ -103,13 +104,13 @@ for row in "ops:$OPENJAWZ_SHARE/ops/templates/identity.env.template:templates (o
   IFS=: read -r _ path label <<< "$row"
   if [ -e "$path" ]; then green "$label installed"; else yellow "$label missing: $path"; fi
 done
-n=$(ls "$SYNAPS_BASE_DIR/agents"/*.md 2>/dev/null | wc -l)
+n=$(ls "$SYNAPS_BASE_DIR/agents"/*.md 2>/dev/null | wc -l || true)
 [ "$n" -gt 0 ] && green "crew: $n role file(s) in ~/.synaps-cli/agents" || yellow "crew not installed for this user (openjawz crew install)"
 [ -r "$OPENJAWZ_CONFIG/identity.env" ] && green "identity.env present" || yellow "no identity.env (openjawz onboard)"
 
 # brain consolidation
 if oj::have axel && [ -f "$OPENJAWZ_STATE/last-consolidation" ]; then
-  age=$(( ($(date +%s) - $(stat -c %Y "$OPENJAWZ_STATE/last-consolidation")) / 3600 ))
+  age=$(( ($(date +%s) - $(stat -c %Y "$OPENJAWZ_STATE/last-consolidation" || echo 0)) / 3600 ))
   [ "$age" -le 24 ] && green "brain consolidated ${age}h ago" || yellow "brain last consolidated ${age}h ago"
 fi
 

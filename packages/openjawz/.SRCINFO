@@ -1,0 +1,87 @@
+pkgbase = openjawz
+	pkgver = 0.1.0rc1
+	pkgrel = 1
+	url = https://github.com/HaseebKhalid1507/OpenJAWZ
+	arch = any
+	license = MIT
+	makedepends = git
+	options = !strip
+	options = !debug
+	source = openjawz::git+https://github.com/HaseebKhalid1507/OpenJAWZ.git#tag=v0.1.0rc1
+	sha256sums = SKIP
+
+pkgname = openjawz-meta
+	pkgdesc = OpenJAWZ: the operating layer on the Synaps runtime (meta)
+	depends = synaps-bin>=0.9.1rc1
+	depends = openjawz-core=0.1.0rc1
+	depends = openjawz-daemon=0.1.0rc1
+	depends = openjawz-hooks=0.1.0rc1
+	depends = openjawz-crew=0.1.0rc1
+	depends = openjawz-ops=0.1.0rc1
+	depends = openjawz-brain=0.1.0rc1
+	depends = openjawz-ui=0.1.0rc1
+	optdepends = axel-bin: the brain (persistent memory with provenance)
+	optdepends = gum: nicer first-run form
+	optdepends = snapper: snapshot before update on btrfs
+	optdepends = foot: fast terminal for the hotkey
+	optdepends = waybar: bar widget
+	optdepends = libnotify: notifications out
+	optdepends = inotify-tools: fs hook
+	optdepends = socat: desktop hook
+	provides = openjawz
+
+pkgname = openjawz-core
+	pkgdesc = OpenJAWZ core: router, lib, install/update/migrate/doctor/uninstall
+	install = openjawz-core.install
+	depends = bash
+	depends = jq
+	depends = systemd
+	depends = coreutils
+	depends = util-linux
+
+pkgname = openjawz-daemon
+	pkgdesc = OpenJAWZ: synaps-daemon.service (user unit), config defaults, profiles
+	depends = openjawz-core=0.1.0rc1
+	depends = synaps-bin
+	depends = systemd
+
+pkgname = openjawz-hooks
+	pkgdesc = OpenJAWZ: OS event bridges (desktop, fs, notify, chronos, system) + the ambient session
+	depends = openjawz-core=0.1.0rc1
+	depends = socat
+	depends = inotify-tools
+	depends = dbus
+	depends = libnotify
+	depends = jq
+	depends = gawk
+	depends = python
+
+pkgname = openjawz-crew
+	pkgdesc = OpenJAWZ: the crew — role files, playbooks, flavors
+	depends = openjawz-core=0.1.0rc1
+	depends = openjawz-ops=0.1.0rc1
+	depends = python
+
+pkgname = openjawz-ops
+	pkgdesc = OpenJAWZ: templates, skills, tools, the discipline (onboard / boot / checkpoint / shutdown)
+	depends = openjawz-core=0.1.0rc1
+	depends = python
+	optdepends = gum: first-run form
+	optdepends = yt-dlp: the yt tool
+
+pkgname = openjawz-brain
+	pkgdesc = OpenJAWZ: memory policy, consolidation timer, brain init
+	depends = openjawz-core=0.1.0rc1
+	depends = openjawz-ops=0.1.0rc1
+	depends = python
+	optdepends = axel-bin: the memory engine itself
+	optdepends = sqlite: secret scrub during consolidate
+
+pkgname = openjawz-ui
+	pkgdesc = OpenJAWZ: hotkey summon, bar widget, theme swatch
+	depends = openjawz-core=0.1.0rc1
+	depends = jq
+	depends = python
+	optdepends = foot: terminal server for the hotkey
+	optdepends = kitty: terminal fallback
+	optdepends = waybar: bar widget

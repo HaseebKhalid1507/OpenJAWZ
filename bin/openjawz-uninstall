@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# openjawz-uninstall: disable units → pacman -Rns → remove the repo Include → ask about the brain
-# usage: openjawz uninstall [--yes] [--keep-brain | --purge] [--all]
+# openjawz-uninstall: disable units → pacman -Rns → remove the repo line + sync db → ask about the brain
+# usage: openjawz uninstall [--yes] [--keep-brain | --purge] [--all]   (--purge: state, config, brain, files we wrote under ~/.synaps-cli; --all: + synaps-bin/axel-bin, and with --purge all of ~/.synaps-cli)
 # owner: openjawz-core
 # ci: fast
 set -euo pipefail
@@ -10,6 +10,17 @@ keep=""; all=0
 for a in "$@"; do case "$a" in --yes|-y) export OPENJAWZ_YES=1 ;; --keep-brain) keep=1 ;; --purge) keep=0 ;; --all) all=1 ;; -h|--help) sed -n '2,4p' "$0"; exit 0 ;; esac; done
 oj::is_root && oj::die "run as your user, not root"
 sudo="$(oj::sudo)"
+axel_dir="${XDG_CONFIG_HOME:-$HOME/.config}/axel"
+manifest="$OPENJAWZ_STATE/installed-files"
+
+# 0. --purge asks first (README: "asks first; --yes to skip")
+if [ "$keep" = 0 ] && ! oj::yes; then
+  if t="$(oj::tty)"; then
+    printf 'Remove brain + state + config (%s, %s, %s + the files install wrote under %s)? [y/N] ' "$axel_dir" "$OPENJAWZ_HOME" "$OPENJAWZ_STATE" "$SYNAPS_BASE_DIR"
+    read -r ans < "$t" || ans=n
+    [ "$ans" = y ] || [ "$ans" = Y ] || oj::die "uninstall --purge: refused"
+  else oj::die "uninstall --purge: no terminal to ask on; pass --yes"; fi
+fi
 
 # 1. units
 if systemctl --user --version >/dev/null 2>&1; then
@@ -37,27 +48,47 @@ if [ "${#pkgs[@]}" -gt 0 ]; then
 else
   oj::log info "no openjawz packages installed"
 fi
+# bytecode a root process may have dropped under /usr/share/openjawz (unowned — pacman -Qo fails)
+if [ -d "$OPENJAWZ_SHARE" ]; then
+  while IFS= read -r d; do
+    pacman -Qo "$d" >/dev/null 2>&1 || oj::run $sudo rm -rf "$d"
+  done < <(find "$OPENJAWZ_SHARE" -type d -name __pycache__ 2>/dev/null)
+  $sudo rmdir "$OPENJAWZ_SHARE" 2>/dev/null || true
+fi
 
-# 4. repo
+# 4. repo: the Include (public path), the sync db (both paths), the local-repo marker
 if [ -e /etc/pacman.d/openjawz.conf ]; then
   oj::run $sudo sed -i '/^Include = \/etc\/pacman.d\/openjawz.conf$/d' /etc/pacman.conf
   oj::run $sudo rm -f /etc/pacman.d/openjawz.conf
   oj::log ok "repo line removed"
 fi
+oj::run $sudo rm -f /var/lib/pacman/sync/openjawz.db /var/lib/pacman/sync/openjawz.files /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig
+rm -f "$OPENJAWZ_CONFIG/local-repo"
 
 # 5. the brain
 if [ -z "$keep" ]; then
   keep=1
   if t="$(oj::tty)"; then
-    printf 'Remove your brain and state too (%s, %s)? [y/N] ' "$OPENJAWZ_HOME" "$OPENJAWZ_STATE"
+    printf 'Remove your brain and state too (%s, %s, %s)? [y/N] ' "$axel_dir" "$OPENJAWZ_HOME" "$OPENJAWZ_STATE"
     read -r ans < "$t" || ans=n
     [ "$ans" = y ] || [ "$ans" = Y ] && keep=0
   fi
 fi
 if [ "$keep" = 0 ]; then
-  rm -rf "$OPENJAWZ_HOME" "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_RUN"
-  echo "purged $OPENJAWZ_HOME $OPENJAWZ_STATE $OPENJAWZ_CONFIG"
+  # the files install wrote under ~/.synaps-cli, from the manifest — never a glob
+  if [ -r "$manifest" ]; then
+    while IFS= read -r p; do
+      case "$p" in "$SYNAPS_BASE_DIR"/*) rm -f "$p" ;; esac
+    done < "$manifest"
+  fi
+  if [ "$all" = 1 ]; then rm -rf "$SYNAPS_BASE_DIR"
+  else for d in inbox plugins run sessions agents; do rmdir "$SYNAPS_BASE_DIR/$d" 2>/dev/null || true; done; fi
+  rm -rf "$OPENJAWZ_HOME" "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_RUN" "$axel_dir"
+  rmdir "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" "${XDG_CONFIG_HOME:-$HOME/.config}/systemd" 2>/dev/null || true
+  echo "purged $OPENJAWZ_HOME $OPENJAWZ_STATE $OPENJAWZ_CONFIG $axel_dir"
+  if [ "$all" = 1 ]; then echo "purged $SYNAPS_BASE_DIR"; echo "kept: nothing"
+  else echo "kept: $SYNAPS_BASE_DIR (the runtime's own files; --all removes it)"; fi
 else
-  echo "kept: $OPENJAWZ_HOME (brain) · $OPENJAWZ_STATE (state) · $OPENJAWZ_CONFIG · ~/.synaps-cli · ~/.config/axel"
+  echo "kept: $OPENJAWZ_HOME (brain) · $OPENJAWZ_STATE (state) · $OPENJAWZ_CONFIG · $SYNAPS_BASE_DIR · $axel_dir"
 fi
 echo "OpenJAWZ removed."

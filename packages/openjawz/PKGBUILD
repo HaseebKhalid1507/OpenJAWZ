@@ -8,19 +8,16 @@
 
 pkgbase=openjawz
 pkgname=(openjawz-meta openjawz-core openjawz-daemon openjawz-hooks openjawz-crew openjawz-ops openjawz-brain openjawz-ui)
-pkgver=0.1.0
+pkgver=0.1.0rc1
 pkgrel=1
 arch=('any')
 url='https://github.com/HaseebKhalid1507/OpenJAWZ'
 license=('MIT')
 makedepends=('git')
-if [[ -n ${OPENJAWZ_SRC:-} ]]; then
-  source=()
-  sha256sums=()
-else
-  source=("openjawz::git+$url.git#tag=v$pkgver")
-  sha256sums=('SKIP')
-fi
+options=('!strip' '!debug')
+# source is unconditional so .SRCINFO is environment-independent; OPENJAWZ_SRC only swaps the tree in prepare()
+source=("openjawz::git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
 
 _cd() { cd "$srcdir/openjawz" || return 1; }
 _lib=usr/lib/openjawz
@@ -29,6 +26,7 @@ _units=usr/lib/systemd/user
 
 prepare() {
   if [[ -n ${OPENJAWZ_SRC:-} ]]; then
+    # local tree wins over the tag checkout (build-repo.sh, install-smoke)
     rm -rf "$srcdir/openjawz"; cp -a "$OPENJAWZ_SRC" "$srcdir/openjawz"
   fi
   [[ "$(cat "$srcdir/openjawz/VERSION")" == "$pkgver" ]] || { echo "VERSION $(cat "$srcdir/openjawz/VERSION") != pkgver $pkgver" >&2; return 1; }
@@ -57,6 +55,7 @@ package_openjawz-meta() {
   depends=('synaps-bin>=0.9.1rc1'
            "openjawz-core=$pkgver" "openjawz-daemon=$pkgver" "openjawz-hooks=$pkgver"
            "openjawz-crew=$pkgver" "openjawz-ops=$pkgver" "openjawz-brain=$pkgver" "openjawz-ui=$pkgver")
+  provides=('openjawz')
   optdepends=('axel-bin: the brain (persistent memory with provenance)'
               'gum: nicer first-run form'
               'snapper: snapshot before update on btrfs'

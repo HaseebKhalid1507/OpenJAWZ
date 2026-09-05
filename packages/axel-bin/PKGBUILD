@@ -14,7 +14,8 @@ url='https://github.com/HaseebKhalid1507/axel'
 license=('MIT')
 provides=("axel=$pkgver")
 conflicts=('axel')
-options=('!strip')
+depends=('glibc' 'gcc-libs')
+options=('!strip' '!debug')
 _tag="v$pkgver"
 _asset="axel-$_tag-x86_64-unknown-linux-gnu.tar.gz"
 
@@ -27,6 +28,10 @@ else
   source=("$_asset::$url/releases/download/$_tag/$_asset")
   sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 fi
+
+prepare() {
+  [[ ${sha256sums[0]} != 0000* ]] || { error "release sha is a placeholder — set AXEL_TARBALL (SHA256SUMS beside it) or wait for the release"; return 1; }
+}
 
 package() {
   local bin

@@ -12,8 +12,10 @@ arch=('any')
 url='https://github.com/HaseebKhalid1507/OpenJAWZ'
 license=('MIT')
 install=openjawz-keyring.install
+options=('!strip' '!debug')
 source=()
 sha256sums=()
+# NOT signed with the key it ships (build-repo.sh builds it sans --sign): pacman -U of a self-signed keyring is circular
 
 package() {
   local keys="${OPENJAWZ_KEYS:-$startdir/keys}"
@@ -21,4 +23,5 @@ package() {
   install -Dm644 "$keys/openjawz.gpg"      "$pkgdir/usr/share/pacman/keyrings/openjawz.gpg"
   install -Dm644 "$keys/openjawz-trusted"  "$pkgdir/usr/share/pacman/keyrings/openjawz-trusted"
   install -Dm644 "$keys/openjawz-revoked"  "$pkgdir/usr/share/pacman/keyrings/openjawz-revoked"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

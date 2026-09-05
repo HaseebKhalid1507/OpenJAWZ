@@ -28,6 +28,31 @@ if openjawz help hooks >/dev/null 2>&1 && [ "$P" = desktop ]; then
 fi
 [ "$(openjawz migrate --pending)" = none ] && ok "migrate --pending → none" || bad "pending migrations"
 [ "$(systemctl --user show -p MainPID --value synaps-daemon.service)" = "$(cat ~/.synaps-cli/run/daemon.pid)" ] && ok "daemon pid == MainPID" || bad "daemon pid != MainPID"
+# A1: local mode never touched /etc
+[ "$(grep -c openjawz /etc/pacman.conf)" = 0 ] && ok "A1 /etc/pacman.conf untouched" || bad "A1 openjawz in /etc/pacman.conf"
+[ ! -e /etc/pacman.d/openjawz.conf ] && ok "A1 no /etc/pacman.d/openjawz.conf" || bad "A1 /etc/pacman.d/openjawz.conf written in local mode"
+[ -f ~/.config/openjawz/local-repo ] && ok "A1 local-repo marker" || bad "A1 no local-repo marker"
+# A12: migrate-notify enabled with the ambient unit; closing line spelling is covered by grep in driver
+if [ "$P" = desktop ]; then systemctl --user is-enabled openjawz-migrate-notify.service >/dev/null 2>&1 && ok "A12 migrate-notify enabled" || bad "A12 migrate-notify not enabled"; fi
+# A5: doctor always prints, even with the daemon down or the crew missing
+systemctl --user stop synaps-daemon.service
+openjawz doctor --brief 2>/dev/null | grep -q '^doctor:' && ok "A5 doctor --brief prints with the daemon down" || bad "A5 doctor silent with the daemon down"
+mv ~/.synaps-cli/agents ~/.synaps-cli/agents.bak 2>/dev/null; mkdir -p ~/.synaps-cli/agents
+openjawz doctor 2>/dev/null | grep -qi crew && ok "A5 doctor mentions crew when agents are missing" || bad "A5 doctor silent on missing crew"
+rm -rf ~/.synaps-cli/agents; mv ~/.synaps-cli/agents.bak ~/.synaps-cli/agents 2>/dev/null
+openjawz doctor 2>/dev/null | grep -q 'unsigned local' && ok "A5 doctor shows the unsigned-local row" || bad "A5 doctor lacks the unsigned-local row"
+systemctl --user start synaps-daemon.service; sleep 2
+# A2/A3/A4: update in local mode, under script(1), then ambient is back
+[ -d /repo2 ] || { sudo mkdir -p /repo2 && sudo chown "$(id -u)" /repo2; }
+if [ -n "$(ls /repo2/*.pkg.tar.zst 2>/dev/null)" ]; then
+  openjawz update --yes 2>/tmp/upd-nolocal.err; r=$?
+  [ "$r" = 2 ] && grep -q 'update --local' /tmp/upd-nolocal.err && ok "A2 update without --local → rc 2 + hint" || bad "A2 update without --local rc=$r: $(tail -1 /tmp/upd-nolocal.err)"
+  script -qec "openjawz update --local /repo2 --yes --no-snapshot; echo rc=\$?" /dev/null > /tmp/upd.log 2>&1
+  grep -q 'rc=0' /tmp/upd.log && ok "A2/A3 update --local under script(1) rc 0" || { bad "A2/A3 update --local failed"; tail -5 /tmp/upd.log; }
+  [ "$(grep -c openjawz /etc/pacman.conf)" = 0 ] && ok "A2 update wrote nothing to /etc" || bad "A2 update touched /etc/pacman.conf"
+  [ "$(stat -c %a ~/.local/share/openjawz/update.log 2>/dev/null)" = 600 ] && ok "A3 update.log mode 600" || bad "A3 update.log mode $(stat -c %a ~/.local/share/openjawz/update.log 2>/dev/null)"
+  if [ "$P" = desktop ]; then sleep 3; openjawz ambient status 2>/dev/null | grep -q live && ok "A4 ambient live after update" || bad "A4 ambient not live after update"; fi
+else echo "  warn no /repo2 — A2/A3/A4 update leg skipped"; fi
 echo
 openjawz doctor
 exit "$fail"

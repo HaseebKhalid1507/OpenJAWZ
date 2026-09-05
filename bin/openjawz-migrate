@@ -28,6 +28,8 @@ fi
 pending=(); for f in "${files[@]}"; do [ -e "$mark/$f" ] || pending+=("$f"); done
 dirty=(); for d in "$mark"/*.running; do [ -e "$d" ] && dirty+=("$(basename "$d" .running)"); done
 
+# read-only modes need no lock; everything that writes markers takes it (concurrent runners → one winner)
+case "$mode" in pending|list|notify) ;; *) oj::lock migrate ;; esac
 case "$mode" in
   pending) if [ "${#pending[@]}" = 0 ]; then echo none; else printf '%s\n' "${pending[@]}"; fi; exit 0 ;;
   list)

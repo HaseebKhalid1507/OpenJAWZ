@@ -13,6 +13,7 @@ for d in "$OPENJAWZ_LIB/bin" "$OPENJAWZ_LIB/tools"; do
   [ -d "$d" ] || continue
   for f in "$d"/openjawz-*; do
     [ -x "$f" ] || continue
+    sed -n '2,6p' "$f" | grep -qx '# hidden' && continue
     v="${f##*/openjawz-}"
     s="$(sed -n '2,6{s/^# openjawz-[a-z0-9-]*: *//p}' "$f" | head -1)"
     rows+=("$v	${s:-(no header)}")

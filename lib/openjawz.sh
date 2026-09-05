@@ -89,8 +89,12 @@ oj::run() {
   oj::log info "+ $*" >/dev/null 2>&1
   "$@"
 }
+# oj::lock NAME — one instance per user. The fd is inherited by children (bash has no close-on-exec), so:
+#   * call it AFTER any `exec` re-exec of the script (script/sudo), never before — the child would block on itself;
+#   * idempotent within one process tree: a re-exec'd child that inherits OJ_LOCK_FD keeps the lock it already holds.
 oj::lock() {
   local name="$1"
+  [ -n "${OJ_LOCK_FD:-}" ] && return 0
   mkdir -p "$OPENJAWZ_RUN"
   exec {OJ_LOCK_FD}>"$OPENJAWZ_RUN/$name.lock"
   flock -n "$OJ_LOCK_FD" || oj::die "openjawz $name: already running"

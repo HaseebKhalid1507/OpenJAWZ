@@ -5,6 +5,7 @@
 # ci: fast
 set -euo pipefail
 OPENJAWZ_LIB="${OPENJAWZ_LIB:-/usr/lib/openjawz}"
+export PYTHONDONTWRITEBYTECODE=1   # tools/plugins under /usr never drop __pycache__
 verb="${1:-help}"; [ $# -gt 0 ] && shift
 case "$verb" in
   -h|--help) verb=help ;;

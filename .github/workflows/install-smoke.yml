@@ -1,0 +1,16 @@
+name: install-smoke (container)
+# Container tests run BY HAND on a builder until a self-hosted runner exists: they need a privileged
+# archlinux container with systemd (tests/install-smoke/container.sh) which GitHub's hosted runners do not offer.
+# Trigger manually to record that the leg was run; the real evidence lives in the release notes.
+on:
+  workflow_dispatch:
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: container tests (install-smoke + uninstall-clean)
+        run: |
+          echo "container legs are run by hand: tests/install-smoke/run.sh && tests/uninstall-clean/run.sh"
+          echo "see tests/README.md (tier 'container')"
+          exit 1

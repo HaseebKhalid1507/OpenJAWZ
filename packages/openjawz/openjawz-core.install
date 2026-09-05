@@ -2,5 +2,6 @@ post_install() {
   echo "==> Run 'openjawz install' as your user to finish setup."
 }
 post_upgrade() {
-  echo "==> Run 'openjawz update' (or 'openjawz migrate') to apply pending migrations."
+  # the migrations hook (95-openjawz-migrations.hook) already announces new migrations; nothing to repeat here
+  :
 }

@@ -28,7 +28,13 @@ detect_profile() {
 [ -n "$profile" ] || profile="$(detect_profile)"
 case "$profile" in desktop|laptop|deck|vm) ;; *) oj::die "install: unknown profile $profile" ;; esac
 export OPENJAWZ_PROFILE="$profile"
+umask 077
 mkdir -p "$OPENJAWZ_STATE" "$OPENJAWZ_CONFIG" "$OPENJAWZ_HOME" "$OPENJAWZ_DATA" "$OPENJAWZ_RUN"
+# local unsigned repo (boot --local): marker read by doctor (yellow) and update (needs --local DIR)
+case "${OPENJAWZ_REPO:-}" in file://*) printf '%s\n' "${OPENJAWZ_REPO#file://}" > "$OPENJAWZ_CONFIG/local-repo" ;; esac
+# every file written under ~/.synaps-cli goes into the manifest uninstall --purge reads (idempotent)
+manifest="$OPENJAWZ_STATE/installed-files"; touch "$manifest"; touch "$manifest.t0"
+oj::record() { local p; for p in "$@"; do grep -qxF "$p" "$manifest" || printf '%s\n' "$p" >> "$manifest"; done; }
 oj::log info "openjawz install $(oj::version) — profile=$profile yes=${OPENJAWZ_YES:-0}"
 
 # ── stages ───────────────────────────────────────────────────────────────────
@@ -49,7 +55,7 @@ st_config() {
         -e "s|^identity = {{IDENTITY}}|${ident:+identity = $ident}${ident:-# identity = (set by openjawz onboard)}|" \
         -e "s|^model = {{MODEL}}|${model:+model = $model}${model:-# model = (runtime default; set provider/model here)}|" \
         "$OPENJAWZ_SHARE/daemon/config.default" > "$cfg"
-    chmod 600 "$cfg"; echo "wrote $cfg"
+    chmod 600 "$cfg"; echo "wrote $cfg"; oj::record "$cfg"
   else
     echo "kept existing $cfg"
   fi
@@ -61,7 +67,7 @@ st_config() {
   if [ ! -e "$mcp" ]; then
     if oj::have axel; then cp "$OPENJAWZ_SHARE/daemon/mcp.json.default" "$mcp"
     else printf '{ "mcpServers": {} }\n' > "$mcp"; echo "axel absent: mcp.json has no servers (openjawz brain init adds it later)"; fi
-    chmod 600 "$mcp"
+    chmod 600 "$mcp"; oj::record "$mcp"
   fi
 }
 
@@ -80,6 +86,7 @@ st_unit() {
   oj::daemon_alive || { echo "daemon not answering: journalctl --user -u synaps-daemon.service"; return 1; }
   # ambient session after the daemon on every login (oneshot; the ambient stage below runs it now)
   [ -f /usr/lib/systemd/user/openjawz-ambient.service ] && systemctl --user enable openjawz-ambient.service >/dev/null 2>&1
+  [ -f /usr/lib/systemd/user/openjawz-migrate-notify.service ] && systemctl --user enable openjawz-migrate-notify.service >/dev/null 2>&1
   if [ "${OPENJAWZ_LINGER:-0}" = 1 ]; then
     loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q yes || oj::run loginctl enable-linger "$USER" || echo "enable-linger failed (needs polkit or sudo loginctl enable-linger $USER)"
   fi
@@ -92,7 +99,7 @@ st_plugins() {
   mkdir -p "$SYNAPS_BASE_DIR/plugins"; n=0
   for p in "$d"/*/; do
     [ -d "$p" ] || continue
-    ln -sfn "${p%/}" "$SYNAPS_BASE_DIR/plugins/$(basename "$p")"; n=$((n+1))
+    ln -sfn "${p%/}" "$SYNAPS_BASE_DIR/plugins/$(basename "$p")"; n=$((n+1)); oj::record "$SYNAPS_BASE_DIR/plugins/$(basename "$p")"
   done
   echo "$n plugin symlink(s)"
 }
@@ -120,7 +127,10 @@ run_stage hooks     via hooks enable
 run_stage ambient   via ambient ensure
 run_stage ui        via ui install
 run_stage migrate   st_migrate
+# whatever the other members wrote under ~/.synaps-cli this run (crew roles, system.md, preamble) → manifest
+find "$SYNAPS_BASE_DIR" -maxdepth 2 \( -name '*.md' -o -name mcp.json -o -name config \) -newer "$manifest.t0" 2>/dev/null | while IFS= read -r p; do oj::record "$p"; done
+rm -f "$manifest.t0"
 echo
 openjawz doctor --brief || true
 echo
-echo "Attach:  synaps --attach --new      Uninstall:  openjawz uninstall"
+echo "Attach:  synaps --attach      Uninstall:  openjawz uninstall"

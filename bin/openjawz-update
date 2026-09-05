@@ -1,21 +1,44 @@
 #!/usr/bin/env bash
-# openjawz-update: lock → brain backup → snapshot → pacman -Syu openjawz-meta → migrate → daemon reload → doctor
-# usage: openjawz update [--yes] [--no-snapshot]
+# openjawz-update: lock → brain backup → snapshot → pacman -Syu openjawz-meta → migrate → daemon reload → ambient → doctor
+# usage: openjawz update [--yes] [--no-snapshot] [--local DIR]   (--local: transient unsigned repo, never written to /etc)
 # owner: openjawz-core
 # ci: fast
 set -euo pipefail
 . "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
 oj::paths
-snap=1
-for a in "$@"; do case "$a" in --yes|-y) export OPENJAWZ_YES=1 ;; --no-snapshot) snap=0 ;; -h|--help) sed -n '2,4p' "$0"; exit 0 ;; esac; done
+snap=1; local_dir=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) export OPENJAWZ_YES=1 ;;
+    --no-snapshot) snap=0 ;;
+    --local) local_dir="${2:?--local needs DIR}"; shift ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) oj::die "update: unknown flag $1" ;;
+  esac; shift
+done
 oj::is_root && oj::die "run as your user, not root"
-oj::lock update
+umask 077
 log="$OPENJAWZ_STATE/update.log"; mkdir -p "$OPENJAWZ_STATE"
 
-# full transcript is the only useful bug report
+# full transcript is the only useful bug report. The re-exec must happen BEFORE the lock (the child inherits the fd).
 if [ -z "${OPENJAWZ_UPDATE_LOGGED:-}" ] && oj::have script && [ -t 1 ]; then
   export OPENJAWZ_UPDATE_LOGGED=1
-  exec script -qefc "$(printf '%q ' "$0" "$@")" "$log"
+  args=(); [ "$snap" = 0 ] && args+=(--no-snapshot); [ -n "$local_dir" ] && args+=(--local "$local_dir"); oj::yes && args+=(--yes)
+  exec script -qefc "$(printf '%q ' "$0" "${args[@]}")" "$log"
+fi
+oj::lock update
+
+# local unsigned repo (boot --local): the marker says so; the repo is transient, /etc is never touched
+marker="$OPENJAWZ_CONFIG/local-repo"
+[ -n "$local_dir" ] || case "${OPENJAWZ_REPO:-}" in file://*) local_dir="${OPENJAWZ_REPO#file://}" ;; esac
+if [ -e "$marker" ] && [ -z "$local_dir" ]; then
+  oj::die "installed from a local unsigned repo ($(cat "$marker")); run: openjawz update --local DIR" 2
+fi
+if [ -n "$local_dir" ]; then
+  local_dir="$(cd "$local_dir" && pwd)" || oj::die "no such directory $local_dir" 2
+  { [ -r "$local_dir/openjawz.db" ] && compgen -G "$local_dir/openjawz-meta-*.pkg.tar.zst" >/dev/null; } ||
+    oj::die "$local_dir is not a built repo (packages/build-repo.sh --no-sign --out DIR)" 2
+  printf '\e[31m!! UNSIGNED LOCAL REPO (test mode) %s\e[0m\n' "$local_dir" >&2
 fi
 
 # wait for pacman
@@ -56,17 +79,31 @@ fi
 
 # pacman
 sudo="$(oj::sudo)"
-oj::run $sudo pacman -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta
+if [ -n "$local_dir" ]; then
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  cp /etc/pacman.conf "$tmp/pacman.conf"
+  printf '\n[openjawz]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$local_dir" >> "$tmp/pacman.conf"
+  # a stale signed db from an earlier signed repo would poison the unsigned sync
+  oj::run $sudo rm -f /var/lib/pacman/sync/openjawz.db /var/lib/pacman/sync/openjawz.files /var/lib/pacman/sync/openjawz.db.sig /var/lib/pacman/sync/openjawz.files.sig
+  oj::run $sudo pacman --config "$tmp/pacman.conf" -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta
+  printf '%s\n' "$local_dir" > "$marker"
+else
+  oj::run $sudo pacman -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta
+fi
 
 # migrations
+oj::log info "migrations:"
 openjawz migrate ${OPENJAWZ_YES:+--yes}
 
 # daemon reload; restart on refusal
+oj::log info "reloading the daemon (drains up to 30 s)"
 if oj::daemon_alive; then
-  if out="$(synaps daemon reload --json --exe /usr/bin/synaps 2>&1)"; then oj::log ok "daemon reloaded in place"
+  if out="$(synaps daemon reload --json --exe "$(command -v synaps)" 2>&1)"; then oj::log ok "daemon reloaded in place"
   else oj::log warn "reload refused ($(printf '%s' "$out" | tail -1)); restarting the unit"; systemctl --user restart synaps-daemon.service; fi
 else
   systemctl --user restart synaps-daemon.service 2>/dev/null || true
 fi
+# the ambient session does not survive a restart on its own (oneshot unit) — put it back
+openjawz ambient ensure >/dev/null 2>&1 || oj::log warn "ambient session not restored — openjawz ambient ensure"
 echo
 openjawz doctor --brief || true

@@ -2,7 +2,7 @@
 Operation = Install
 Operation = Upgrade
 Type = Path
-Target = usr/share/openjawz/migrations/*
+Target = usr/share/openjawz/migrations/[0-9]*-*.sh
 
 [Action]
 Description = OpenJAWZ: migrations shipped — run 'openjawz migrate' as your user

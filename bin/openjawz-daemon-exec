@@ -2,7 +2,9 @@
 # openjawz-daemon-exec: ExecStart shim — synaps daemon --foreground [--idle-exit N]
 # usage: (systemd only) synaps-daemon.service
 # owner: openjawz-daemon
+# hidden
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1   # the daemon spawns the python plugins from /usr/share/openjawz
 args=(daemon --foreground)
 [ "${OPENJAWZ_IDLE_EXIT:-0}" != 0 ] && args+=(--idle-exit "$OPENJAWZ_IDLE_EXIT")
 [ -n "${OPENJAWZ_SYNAPS_PROFILE:-}" ] && args=(--profile "$OPENJAWZ_SYNAPS_PROFILE" "${args[@]}")

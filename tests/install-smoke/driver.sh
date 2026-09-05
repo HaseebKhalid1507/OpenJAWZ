@@ -53,5 +53,13 @@ step assert
 runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/run/user/1000 bash /work/assert.sh "$P"; arc=$?
 [ "$neg" = 0 ] || { echo "  negatives failed (see above)"; arc=1; }
 echo "boot=$rc assert=$arc seconds=$((T1-T0))" > /work/summary
+step "verbatim README recipe (A/Stranger blocker guard)"
+# runs the README local-mode recipe EXACTLY as printed (flags parsed from README.md) in a fresh tree copy — a signed
+# build under boot's TrustAll mount would die at `pacman -Sy`. This is the leg that was missing when the README said
+# `--throwaway` but the smoke used `--no-sign`, so the printed command was never exercised end-to-end.
+runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/run/user/1000 VERBATIM_SRC=/tmp/src \
+  bash /work/verbatim-readme.sh "$st" "$ax" | tee /work/verbatim.log
+grep -q 'verbatim-readme: fail=0' /work/verbatim.log || { echo "  verbatim README recipe FAILED"; arc=1; }
+echo "boot=$rc assert=$arc seconds=$((T1-T0))" > /work/summary
 [ -f /work/keep ] && step "kept alive for uninstall-clean" && runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/run/user/1000 bash /work/uninstall-clean.sh > /work/uninstall.log 2>&1
 finish "done"

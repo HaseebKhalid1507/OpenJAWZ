@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# openjawz-shutdown: the 7-step shutdown checklist as a VERIFIER — refuses if the brief was not written
+# usage: openjawz shutdown [--auto] [--no-handoff] [--number N] [--dry-run]
+# owner: openjawz-ops
+# ci: fast
+#
+#  1 session-brief.md written this session (else: refuse, print the template)
+#  2 sessions add (number auto, summary from the brief's ## Summary)
+#  3 handoff.md touched this session, or --no-handoff
+#  4 checkpoint cleared
+#  5 journal entry for today exists
+#  6 context files touched? (warn only — dispatch context-updater if not)
+#  7 post-op ls of the sacred files
+#  8 brain: axel extract the brief → staged; axel handoff set < handoff.md   (skipped when axel is absent)
+#  9 backup --quick (skipped when the backup tool is absent)
+# --auto (from the daemon's on_session_end): never refuses; marks the checkpoint "unclean" instead and exits 2.
+set -euo pipefail
+export OJ_CMD=shutdown
+# shellcheck source=../ops/lib/source-lib.sh
+. "$(dirname "$(readlink -f "$0")")/../ops/lib/source-lib.sh"
+usage() { sed -n '2,4p' "$0" | sed 's/^# //'; }
+AUTO=0 NOHANDOFF=0 NUM="" DRY=0
+while [ $# -gt 0 ]; do
+  case $1 in -h|--help) usage; exit 0;; --auto) AUTO=1;; --no-handoff) NOHANDOFF=1;; --number) NUM=$2; shift;; --dry-run) DRY=1;; *) usage; exit 2;; esac; shift
+done
+export NO_COLOR="${NO_COLOR:-}"
+A="$OPENJAWZ_HOME/context/active"
+TOOLS="${OPENJAWZ_TOOLS:-/usr/lib/openjawz/tools}"
+[ -x "$TOOLS/openjawz-sessions" ] || TOOLS="$(dirname "$(readlink -f "$0")")/../ops/tools"
+tool() { local n=$1; shift; if [ -x "$TOOLS/openjawz-$n" ]; then "$TOOLS/openjawz-$n" "$@"; elif [ -x "$TOOLS/$n" ]; then "$TOOLS/$n" "$@"; else return 127; fi; }
+[ -d "$A" ] || oj::die "no engram at $OPENJAWZ_HOME — run: openjawz onboard" 2
+
+# "this session" = since the session-start stamp (boot writes none; we use the last shutdown stamp,
+# falling back to 12 h) — a file counts as touched if it is newer than that.
+STAMP="$OPENJAWZ_STATE/last-shutdown"
+mkdir -p "$OPENJAWZ_STATE"
+since_ref=$(mktemp); if [ -e "$STAMP" ]; then touch -r "$STAMP" "$since_ref"; else touch -d '12 hours ago' "$since_ref"; fi
+touched() { [ -s "$1" ] && [ "$1" -nt "$since_ref" ]; }
+fail=0; warn=0
+step() { printf '%s %s\n' "$1" "$2"; }
+refuse() { # refuse MSG
+  if [ $AUTO = 1 ]; then
+    step "✗" "$1 (auto mode: marking unclean)"; fail=1
+  else
+    step "✗" "$1"; fail=1
+  fi
+}
+
+# 1 ── session brief
+BRIEF="$A/session-brief.md"
+if touched "$BRIEF"; then step "✓" "1 session brief written ($(wc -l < "$BRIEF") lines)"; else
+  refuse "1 session brief missing or stale: $BRIEF"
+  if [ $AUTO = 0 ]; then
+    cat <<EOF
+   Write it first (the agent that lived the session is the best summariser):
+
+   # Session Brief — S<N> ($(date '+%Y-%m-%d %H:%M'))
+   ## Summary
+   ## Tasks Changed
+   ## Projects Updated
+   ## People
+   ## Key Decisions
+   ## Tools Built
+EOF
+  fi
+fi
+
+# 3 ── handoff (checked before 2 so the refusal is complete)
+if [ $NOHANDOFF = 1 ]; then step "·" "3 handoff skipped (--no-handoff)"
+elif touched "$A/handoff.md"; then step "✓" "3 handoff updated"
+else refuse "3 handoff.md not updated this session (pass --no-handoff if nothing is in flight)"; fi
+
+# 5 ── journal
+J="$OPENJAWZ_HOME/notes/journal/$(date -I).md"
+if [ -s "$J" ]; then step "✓" "5 journal $(basename "$J")"; else refuse "5 journal entry missing: $J"; fi
+
+if [ $fail = 1 ]; then
+  rm -f "$since_ref"
+  if [ $AUTO = 1 ]; then
+    printf '# Checkpoint — UNCLEAN shutdown %s: the session ended without the checklist.\n' "$(date '+%Y-%m-%d %H:%M')" >> "$A/checkpoint.md"
+    oj::log warn "shutdown --auto: checklist incomplete; checkpoint marked unclean"; exit 2
+  fi
+  oj::log err "shutdown refused — fix the ✗ items and run again"; exit 1
+fi
+[ $DRY = 1 ] && { step "·" "dry run — nothing written"; rm -f "$since_ref"; exit 0; }
+
+# 2 ── sessions add
+[ -n "$NUM" ] || NUM=$(tool sessions next 2>/dev/null || echo 1)
+summary=$(awk '/^## Summary/{f=1;next} /^## /{f=0} f' "$BRIEF" | sed '/^[[:space:]]*$/d' | head -3 | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+[ -n "$summary" ] || summary=$(sed -n '2,6p' "$BRIEF" | tr '\n' ' ' | cut -c1-300)
+if tool sessions add --number "$NUM" --date "$(date -I)" --summary "${summary:-session $NUM}" >/dev/null 2>&1; then
+  step "✓" "2 sessions add S${NUM#S}"
+else step "!" "2 sessions add failed (duplicate number? pass --number)"; warn=1; fi
+
+# 4 ── checkpoint
+printf '# Checkpoint — session S%s completed %s. No in-flight work.\n' "${NUM#S}" "$(date '+%Y-%m-%d %H:%M %Z')" > "$A/checkpoint.md"
+step "✓" "4 checkpoint cleared"
+
+# 6 ── context files (warn only)
+ctx_touched=0; for f in "$A/projects_active.md" "$OPENJAWZ_HOME/context/people.md" "$OPENJAWZ_HOME/context/full/projects_full.md"; do touched "$f" && ctx_touched=1; done
+if [ $ctx_touched = 1 ]; then step "✓" "6 context files updated"; else step "!" "6 context files untouched — dispatch context-updater with the brief if anything changed"; warn=1; fi
+
+# 7 ── post-op verification
+missing=""
+for f in "$OPENJAWZ_DATA/tasks.json" "$OPENJAWZ_DATA/tasks_history.json" "$A/sessions_recent.md" "$A/handoff.md" "$A/checkpoint.md" "$OPENJAWZ_HOME/SOUL.md" "$OPENJAWZ_HOME/OP.md"; do
+  [ -e "$f" ] || missing="$missing $f"
+done
+if [ -z "$missing" ]; then step "✓" "7 sacred files present"; else step "✗" "7 MISSING:$missing"; fail=1; fi
+
+# 8 ── brain
+if oj::have axel; then
+  if axel extract "$BRIEF" >/dev/null 2>&1; then step "✓" "8 brain: brief extracted to staging"; else step "!" "8 brain: axel extract failed"; warn=1; fi
+  if axel handoff set < "$A/handoff.md" >/dev/null 2>&1; then step "✓" "8 brain: handoff stored"; else step "!" "8 brain: axel handoff set failed"; warn=1; fi
+else step "·" "8 brain: axel not installed (skipped)"; fi
+
+# 9 ── backup
+if tool backup --quick >/dev/null 2>&1; then step "✓" "9 backup --quick"; else step "·" "9 backup: tool absent or failed (skipped)"; fi
+
+touch "$STAMP"; rm -f "$since_ref"
+if [ $fail = 1 ]; then oj::log err "shutdown finished with errors"; exit 1; fi
+[ $warn = 1 ] && oj::log warn "shutdown complete with warnings" || oj::log ok "shutdown complete — S${NUM#S}"
+exit 0

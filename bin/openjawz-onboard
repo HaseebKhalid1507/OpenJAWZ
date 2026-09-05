@@ -116,18 +116,18 @@ fi
 
 # ── write identity.env (0600) ────────────────────────────────────────────────
 mkdir -p "$OPENJAWZ_CONFIG"
-oj::render "$TPL_DIR/identity.env.template" "$IDENTITY"
+oj::render "$TPL_DIR/identity.env.template" "$IDENTITY" || oj::die "render failed"
 chmod 0600 "$IDENTITY"
 oj::log ok "identity.env → $IDENTITY"
 
 # ── render the rest ──────────────────────────────────────────────────────────
 mkdir -p "$OPENJAWZ_HOME" "$OPENJAWZ_HOME/context/active" "$OPENJAWZ_HOME/context/full" \
          "$OPENJAWZ_HOME/notes/journal" "$OPENJAWZ_HOME/workspace/archive" "$OPENJAWZ_DATA" "$SYNAPS_BASE_DIR"
-oj::render "$TPL_DIR/SOUL.md.template"   "$OPENJAWZ_HOME/SOUL.md"
-oj::render "$TPL_DIR/OP.md.template"     "$OPENJAWZ_HOME/OP.md"
-oj::render "$TPL_DIR/AGENTS.md.template" "$OPENJAWZ_HOME/AGENTS.md"
-oj::render "$TPL_DIR/system.md.template" "$SYNAPS_BASE_DIR/system.md"
-oj::render "$PREAMBLE_SRC"               "$SYNAPS_BASE_DIR/subagent-preamble.md"
+oj::render "$TPL_DIR/SOUL.md.template"   "$OPENJAWZ_HOME/SOUL.md" || oj::die "render failed"
+oj::render "$TPL_DIR/OP.md.template"     "$OPENJAWZ_HOME/OP.md" || oj::die "render failed"
+oj::render "$TPL_DIR/AGENTS.md.template" "$OPENJAWZ_HOME/AGENTS.md" || oj::die "render failed"
+oj::render "$TPL_DIR/system.md.template" "$SYNAPS_BASE_DIR/system.md" || oj::die "render failed"
+oj::render "$PREAMBLE_SRC"               "$SYNAPS_BASE_DIR/subagent-preamble.md" || oj::die "render failed"
 oj::log ok "rendered SOUL.md OP.md AGENTS.md → $OPENJAWZ_HOME ; system.md subagent-preamble.md → $SYNAPS_BASE_DIR"
 
 # seed the engram files the shutdown verifier expects (only where absent)

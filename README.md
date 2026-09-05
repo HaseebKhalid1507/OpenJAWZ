@@ -2,25 +2,29 @@
 
 **An agent that lives in your OS, not in a terminal tab.**
 
-OpenJAWZ is the operating layer on top of the [Synaps](https://github.com/HaseebKhalid1507/SynapsCLI) runtime: one daemon per user that owns your sessions, your memory, and your tools — and a 2 MB client you can open from any terminal, any screen, any machine.
+OpenJAWZ is the operating layer on top of the [Synaps](https://github.com/HaseebKhalid1507/SynapsCLI) runtime: one daemon per user that owns your sessions, your memory, and your tools — and a ~2 MB client you can open from any terminal, any screen, any machine.
 
-Close the laptop mid-task. Open it on the desktop. Same session, same context, ~50 ms to resume. Every terminal is a window into one running mind.
+Close the laptop mid-task. Open it on the desktop. Same session, same context. Every terminal is a window into one running mind.
 
 ## The 10-minute promise
 
 ```sh
-curl -fsSL https://openjawz.dev/boot | bash
+curl -fsSLO https://raw.githubusercontent.com/HaseebKhalid1507/OpenJAWZ/main/boot
+curl -fsSLO https://raw.githubusercontent.com/HaseebKhalid1507/OpenJAWZ/main/boot.sha256
+sha256sum -c boot.sha256 && sh boot
 ```
 
-Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs a package, not a distro. Never touches your bootloader or display manager.
+Two files, one checksum, then run it. (A short domain will front this once it is live; the raw URL is the source of truth.)
+
+Arch-based Linux (Arch, CachyOS, EndeavourOS, …). Installs packages, not a distro. Never touches your bootloader or display manager. `sudo` is called where needed; the script itself refuses to run as root.
 
 When it's done you have:
 
-- **a daemon** — `synaps daemon`, socket-activated, idle-exits, comes back on demand
-- **a brain** — persistent memory with provenance, one writer, every session reads it
-- **a crew** — planner / implementer / reviewer / tester agents with a build discipline that measures before it designs
-- **hooks** — your desktop, filesystem, notifications, and clock all feed an always-on session that costs 2 MB while nothing is happening
-- **an identity** — yours, from a template. Tell it your name and what you do.
+- **a daemon** — `synaps daemon` as a systemd *user* service (`synaps-daemon.service`, `Type=simple`). Sessions park to ~2 MB when nobody is watching; the daemon itself stays resident in v0.1. No socket activation yet — the unit is `Type=simple`; the daemon auto-spawns on first attach if it is not running. Socket activation + idle-exit land with the runtime PR (see `docs/architecture.md`, "What the runtime still owes us").
+- **a brain** — persistent memory with provenance, one writer, every session reads it. Requires `axel`; `openjawz doctor` tells you if it is missing.
+- **a crew** — planner / implementer / reviewer / tester (14 roles) with a build discipline that measures before it designs.
+- **hooks** — your desktop, filesystem, notifications, and clock feed an always-on *ambient* session that costs ~2 MB while nothing is happening.
+- **an identity** — yours, from a template. Tell it your name and what you do (`openjawz onboard`).
 
 ## Why a daemon
 
@@ -31,7 +35,7 @@ Every agent CLI you've used spawns a full engine, its own memory, and its own si
 | engine-per-terminal | 40–260 MB |
 | OpenJAWZ (`synaps --attach --new`) | **~2 MB** |
 
-Measured, reproducible — the scripts are in `tests/memprof/`. The numbers come from the Synaps daemon-mode work: sessions that park when nobody's watching, an extension host that runs once, a client with the engine removed.
+Measured, reproducible — the scripts are in `tests/memprof/`; the numbers are the Synaps daemon-mode numbers (its memory-budget doc is the source; ours restates them in `docs/memory-budget.md`). Caveats stated, not hidden: one rendered code block costs **+11 MB** of compiled syntax grammars until idle eviction (120 s); desktop hooks are budgeted at **≤ 25 MB total** for the whole set (table in `docs/memory-budget.md`). Our install smoke measures *attach*, not resume — the resume latency is the runtime's number, not ours.
 
 ## The spectrum
 
@@ -39,7 +43,7 @@ Measured, reproducible — the scripts are in `tests/memprof/`. The numbers come
 |---|---|
 | desktop | daemon + everything, desktop hooks, bar widget |
 | laptop | same, sessions park on lid-close |
-| cyberdeck | **client only** — 2 MB, daemon on your desktop over Tailscale |
+| cyberdeck | **client only** — daemon on your desktop; v0.1 reaches it over an SSH-forwarded socket (`openjawz deck attach <host>`, one command). Native `--tcp` + broker token is a runtime PR. |
 | VM / server | the daemon *is* the machine's agent; a browser is a client |
 
 Same binary. Same brain. Two windows into one mind.
@@ -48,23 +52,44 @@ Same binary. Same brain. Two windows into one mind.
 
 ```
 packages/   PKGBUILDs — the product; everything else is source for these
-daemon/     systemd user unit, socket activation, profiles (desktop/laptop/deck/vm)
-hooks/      desktop / fs / notify / chronos / net → `synaps send` → the ambient session
-crew/       agents, the subagent preamble, playbooks
-ops/        skills, tools, and the SOUL / OP / AGENTS templates
-brain/      memory config and policy
-ui/         hotkey, bar widget, themes
+daemon/     systemd user unit, config.default (flat key = value), profiles (desktop/laptop/deck/vm)
+hooks/      desktop / fs / notify / chronos / system → `synaps send` → the ambient session
+crew/       roles, playbooks, flavors
+ops/        skills, tools, the SOUL / OP / AGENTS templates, boot/checkpoint/shutdown
+brain/      memory policy, consolidation timer, axel defaults
+ui/         hotkey summon, bar widget, themes
 deck/       the client-only profile and aarch64 notes
 migrations/ timestamped, run in order by `openjawz update` — from commit one
-docs/       architecture, spectrum, memory budget
-tests/      install-smoke (fresh container → 10 minutes → attached), hooks, memprof gates
+docs/       architecture, spectrum, memory budget, security, status
+tests/      grep-guard, lint, pkg, templates, tools, hooks, install-smoke, uninstall-clean, memprof
 ```
 
-No Rust here. If the runtime needs to change, that's a PR to Synaps.
+Config is flat `key = value` (`daemon/config.default`) — no sections. No Rust here. If the runtime needs to change, that's a PR to Synaps.
+
+## Uninstall
+
+```sh
+openjawz uninstall              # packages + units + repo line; keeps the brain and your state
+openjawz uninstall --all        # also removes synaps-bin / axel-bin
+openjawz uninstall --purge      # also removes state and the brain (asks first; --yes to skip)
+```
+
+## Security
+
+Signed repo (`SigLevel = Required`), no secrets in this tree (`tests/grep-guard` enforces it on every push), scripts never run as root, the brain's secret-pattern refusal is documented in `brain/memory-policy.md`. The reviewer's table lives in `docs/security.md`.
 
 ## Status
 
-Skeleton. The daemon, parking, attach, thin client, and memory numbers exist and are measured in the Synaps repo. This repo is where they become an install.
+**v0.1.0 — passes install-smoke in `archlinux:latest`: boot → daemon active → doctor no red → attached in 21 s on a warm mirror** (image pull excluded). Full table, what is yellow, and what slipped: `docs/status.md`.
+
+What `openjawz doctor` shows yellow on a fresh box, honestly:
+
+- **brain absent** — until an `axel` release tarball exists, `axel-bin` cannot be built from a URL; the brain rows stay yellow and `openjawz brain init` skips.
+- **desktop / notify hooks** — condition-skipped until a Wayland session exports `WAYLAND_DISPLAY` to systemd (`doctor` prints the exec-once line).
+- **fs hook** — exits clean if none of `watch.list` exists yet (`~/Projects`, `~/Downloads`).
+- **repo unsigned** — only in `--local` test mode; the public repo is `SigLevel = Required`.
+
+Gauntlet: see `docs/gauntlet/summary.md` once a round has run.
 
 ## License
 

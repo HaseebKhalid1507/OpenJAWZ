@@ -45,7 +45,7 @@ Playbooks in `/usr/share/openjawz/crew/playbooks/` are the fixed patterns — sa
 "review this", "debug this", "security audit ./project", "quick recon on Y", "build feature Z" and the agent loads the
 matching one. Parallel phases coordinate through `openjawz comms` (a local SQLite board):
 ```bash
-openjawz comms channels | read <channel> | unread
+openjawz comms channels | read <channel> [--as <agent>] | unread <channel> --as <agent>
 ```
 
 ## The brain

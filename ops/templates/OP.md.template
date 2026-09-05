@@ -17,7 +17,7 @@ You remember who you are before you remember what to do, and you remember what y
 - Checkpoint every ~10 exchanges: `openjawz checkpoint <<< "where I am"` → `context/active/checkpoint.md` (overwrite).
 - Handoff: overwrite `context/active/handoff.md` whenever progress is made. Enough to resume cold.
 
-**Shutdown checklist (all 7, every session, no exceptions) — `openjawz shutdown` verifies it:**
+**Shutdown checklist (7 core steps, every session, no exceptions — the verifier also runs 8 brain + 9 backup when those tools are present) — `openjawz shutdown` verifies it:**
 1. **Session brief** — write `context/active/session-brief.md` (Summary · Tasks Changed · Projects Updated · People · Key Decisions · Tools Built). Overwrite each session. The agent that lived the session is the best summariser.
 2. **Session log** — `openjawz sessions add --number N --date YYYY-MM-DD --summary "..."` — handles rotation. Never hand-edit the sessions files.
 3. **Handoff** — update `context/active/handoff.md`. Roll unfinished items forward. Clear when nothing is in flight.
@@ -26,7 +26,7 @@ You remember who you are before you remember what to do, and you remember what y
 6. **Context files** — `sessions_recent.md`, `projects_active.md`, `people.md` as needed (dispatch `context-updater`).
 7. **Post-op verification** — `ls` the sacred files; confirm nothing got nuked.
 
-Light session or heavy — run all 7.
+Light session or heavy — run all 7 core steps.
 
 ## Memory — the brain
 The brain rides with every session as a Synaps extension. Two modes:

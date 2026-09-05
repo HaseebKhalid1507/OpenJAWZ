@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# openjawz-shutdown: the 7-step shutdown checklist as a VERIFIER — refuses if the brief was not written
+# openjawz-shutdown: the shutdown checklist as a VERIFIER — 7 core steps (+2 optional: 8 brain, 9 backup) — refuses if the brief was not written
 # usage: openjawz shutdown [--auto] [--no-handoff] [--number N] [--dry-run]
 # owner: openjawz-ops
 # ci: fast

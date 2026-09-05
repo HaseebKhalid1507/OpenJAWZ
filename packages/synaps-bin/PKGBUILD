@@ -21,7 +21,7 @@ if [[ -n ${SYNAPS_TARBALL:-} ]]; then
   # local mode: the tarball is copied next to this PKGBUILD (build-repo.sh does it) and used as a local source
   source=("$(basename "$SYNAPS_TARBALL")")
   if [[ -n ${SYNAPS_SHA256:-} ]]; then sha256sums=("$SYNAPS_SHA256")
-  else sha256sums=("$(grep -F "$(basename "$SYNAPS_TARBALL")" "$(dirname "$SYNAPS_TARBALL")/SHA256SUMS" | awk '{print $1}')"); fi
+  else sha256sums=("$(grep -F "$(basename "$SYNAPS_TARBALL")" "$(dirname "$SYNAPS_TARBALL")/SHA256SUMS" | awk '{print $1}' | head -1)"); fi
 else
   source=("$_asset::$url/releases/download/$_tag/$_asset")
   # from the release's SHA256SUMS, verified by hand; bump with the tag

@@ -14,7 +14,7 @@ mkdir -p "$work/src" "$work/dist"
 git archive HEAD | tar -x -C "$work/src"
 cp "$SYNAPS_TARBALL" "$work/dist/"; d="$(dirname "$SYNAPS_TARBALL")"
 [ -n "${AXEL_TARBALL:-}" ] && [ -f "$AXEL_TARBALL" ] && cp "$AXEL_TARBALL" "$work/dist/"
-{ [ -f "$d/SHA256SUMS" ] && cat "$d/SHA256SUMS"; [ -n "${AXEL_TARBALL:-}" ] && [ -f "$(dirname "$AXEL_TARBALL")/SHA256SUMS" ] && cat "$(dirname "$AXEL_TARBALL")/SHA256SUMS"; } > "$work/dist/SHA256SUMS" 2>/dev/null
+{ [ -f "$d/SHA256SUMS" ] && cat "$d/SHA256SUMS"; [ -n "${AXEL_TARBALL:-}" ] && [ -f "$(dirname "$AXEL_TARBALL")/SHA256SUMS" ] && cat "$(dirname "$AXEL_TARBALL")/SHA256SUMS"; } 2>/dev/null | sort -u > "$work/dist/SHA256SUMS"
 cp tests/install-smoke/driver.sh tests/install-smoke/assert.sh tests/uninstall-clean/uninstall-clean.sh "$work/"
 echo "$P" > "$work/profile"; [ -n "${OPENJAWZ_OSRELEASE:-}" ] && printf '%s\n' "$OPENJAWZ_OSRELEASE" > "$work/os-release"
 [ "${KEEP:-0}" = 1 ] && : > "$work/keep"

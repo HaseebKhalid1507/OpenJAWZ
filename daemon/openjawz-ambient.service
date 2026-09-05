@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenJAWZ ambient session (ensure it exists after the daemon is up)
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ
+After=synaps-daemon.service
+Wants=synaps-daemon.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-%E/openjawz/profile.env
+EnvironmentFile=-%E/openjawz/env
+ExecStart=/usr/bin/openjawz ambient ensure
+TimeoutStartSec=90
+
+[Install]
+WantedBy=default.target

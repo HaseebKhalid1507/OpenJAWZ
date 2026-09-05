@@ -92,6 +92,19 @@ if [ -r /etc/pacman.d/openjawz.conf ]; then
   else yellow "/etc/pacman.d/openjawz.conf exists but is not Included from pacman.conf"; fi
 else yellow "no [openjawz] repo configured (installed from packages by hand?)"; fi
 
+# members: what each split package must have put on disk
+for row in "ops:$OPENJAWZ_SHARE/ops/templates/identity.env.template:templates (openjawz-ops)" \
+           "crew:$OPENJAWZ_SHARE/crew/roles/planner.md:crew roles (openjawz-crew)" \
+           "hooks:$OPENJAWZ_LIB/hooks/bridge.sh:hook bridges (openjawz-hooks)" \
+           "brain:$OPENJAWZ_SHARE/brain/memory-policy.md:brain policy (openjawz-brain)" \
+           "plugins:$OPENJAWZ_SHARE/plugins:plugins (openjawz-ops)"; do
+  IFS=: read -r _ path label <<< "$row"
+  if [ -e "$path" ]; then green "$label installed"; else yellow "$label missing: $path"; fi
+done
+n=$(ls "$SYNAPS_BASE_DIR/agents"/*.md 2>/dev/null | wc -l)
+[ "$n" -gt 0 ] && green "crew: $n role file(s) in ~/.synaps-cli/agents" || yellow "crew not installed for this user (openjawz crew install)"
+[ -r "$OPENJAWZ_CONFIG/identity.env" ] && green "identity.env present" || yellow "no identity.env (openjawz onboard)"
+
 # brain consolidation
 if oj::have axel && [ -f "$OPENJAWZ_STATE/last-consolidation" ]; then
   age=$(( ($(date +%s) - $(stat -c %Y "$OPENJAWZ_STATE/last-consolidation")) / 3600 ))

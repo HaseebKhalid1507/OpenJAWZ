@@ -78,6 +78,8 @@ st_unit() {
   oj::run systemctl --user enable --now synaps-daemon.service
   for _ in $(seq 1 20); do oj::daemon_alive && break; sleep 0.5; done
   oj::daemon_alive || { echo "daemon not answering: journalctl --user -u synaps-daemon.service"; return 1; }
+  # ambient session after the daemon on every login (oneshot; the ambient stage below runs it now)
+  [ -f /usr/lib/systemd/user/openjawz-ambient.service ] && systemctl --user enable openjawz-ambient.service >/dev/null 2>&1
   if [ "${OPENJAWZ_LINGER:-0}" = 1 ]; then
     loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q yes || oj::run loginctl enable-linger "$USER" || echo "enable-linger failed (needs polkit or sudo loginctl enable-linger $USER)"
   fi

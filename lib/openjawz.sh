@@ -38,6 +38,7 @@ oj::_load_env() {
     val="${val#\"}"; val="${val%\"}"
     [ -z "${!key+x}" ] && export "$key=$val"
   done < "$1"
+  return 0
 }
 
 # ── logging ──────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ oj::lock() {
 oj::render() {
   local tpl="$1" out="$2" content key val
   [ -r "$tpl" ] || oj::die "render: no such template $tpl"
-  [ -r "$OPENJAWZ_CONFIG/identity.env" ] && oj::_load_env "$OPENJAWZ_CONFIG/identity.env"
+  if [ -r "$OPENJAWZ_CONFIG/identity.env" ]; then oj::_load_env "$OPENJAWZ_CONFIG/identity.env"; fi
   content="$(cat "$tpl")"
   while [[ "$content" =~ \{\{([A-Z_][A-Z0-9_]*)\}\} ]]; do
     key="${BASH_REMATCH[1]}"
@@ -111,17 +112,26 @@ oj::render() {
   mkdir -p "$(dirname "$out")"
   printf '%s\n' "$content" > "$out"
   case "$out" in "$OPENJAWZ_CONFIG"/*) chmod 0600 "$out" ;; *) chmod 0644 "$out" ;; esac
+  return 0
 }
 
 # ── daemon / events ──────────────────────────────────────────────────────────
 oj::daemon_alive() { synaps daemon status >/dev/null 2>&1; }
 oj::ambient_id() { cat "$OPENJAWZ_STATE/ambient.id" 2>/dev/null || return 1; }
+# the ambient session is addressed by NAME (runtime names at create); the id cache is the fallback
+oj::ambient_target() { printf '%s\n' "${OPENJAWZ_AMBIENT:-ambient}"; }
 # oj::send SOURCE CONTENT_TYPE SEVERITY TEXT — one event, one connection, always --session, never --broadcast
 oj::send() {
   local src="$1" ct="$2" sev="$3" text="$4" id err
-  id="$(oj::ambient_id)" || { oj::log warn "send: no ambient session id"; return 1; }
+  id="$(oj::ambient_target)"
   err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)" || {
-    oj::log warn "send: $err"; return 1; }
+    if id="$(oj::ambient_id)"; then
+      err="$(synaps send --session "$id" --source "$src" --content-type "$ct" --severity "$sev" -- "$text" 2>&1 >/dev/null)" || {
+        oj::log warn "send: $err"; return 1; }
+    else
+      oj::log warn "send: $err"; return 1
+    fi
+  }
   case "$err" in *inbox*) oj::log warn "send: fell to inbox: $err"; return 1 ;; esac
   return 0
 }

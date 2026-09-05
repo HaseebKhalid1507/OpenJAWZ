@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# openjawz-update: lock → brain backup → snapshot → pacman -Syu openjawz-meta → migrate → daemon reload → doctor
+# usage: openjawz update [--yes] [--no-snapshot]
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
+oj::paths
+snap=1
+for a in "$@"; do case "$a" in --yes|-y) export OPENJAWZ_YES=1 ;; --no-snapshot) snap=0 ;; -h|--help) sed -n '2,4p' "$0"; exit 0 ;; esac; done
+oj::is_root && oj::die "run as your user, not root"
+oj::lock update
+log="$OPENJAWZ_STATE/update.log"; mkdir -p "$OPENJAWZ_STATE"
+
+# full transcript is the only useful bug report
+if [ -z "${OPENJAWZ_UPDATE_LOGGED:-}" ] && oj::have script && [ -t 1 ]; then
+  export OPENJAWZ_UPDATE_LOGGED=1
+  exec script -qefc "$(printf '%q ' "$0" "$@")" "$log"
+fi
+
+# wait for pacman
+i=0; while [ -e /var/lib/pacman/db.lck ]; do
+  [ "$i" = 0 ] && oj::log warn "waiting for pacman (/var/lib/pacman/db.lck)…"
+  i=$((i+1)); [ "$i" -gt 900 ] && oj::die "pacman lock held for 900 s; giving up"
+  sleep 1
+done
+
+# brain backup (tarball, keep 3) — ours regardless of filesystem
+brain_backup() {
+  if openjawz help brain >/dev/null 2>&1; then openjawz brain backup >/dev/null 2>&1 && return 0; fi
+  local dir="$OPENJAWZ_STATE/backups"; mkdir -p "$dir"
+  [ -d "$OPENJAWZ_HOME" ] || return 0
+  tar --zstd -cf "$dir/brain-$(date +%s).tar.zst" -C "$(dirname "$OPENJAWZ_HOME")" "$(basename "$OPENJAWZ_HOME")" 2>/dev/null || return 0
+  ls -1t "$dir"/brain-*.tar.zst 2>/dev/null | tail -n +4 | xargs -r rm -f
+}
+brain_backup && oj::log ok "brain backup → $OPENJAWZ_STATE/backups"
+
+# snapshot: exit 127 = deliberately absent (continue silently); 1 = present but nothing captured (yellow)
+snapshot() {
+  oj::have snapper || return 127
+  [ "$(findmnt -no FSTYPE / 2>/dev/null)" = btrfs ] || { echo "root is not btrfs"; return 127; }
+  pacman -Q snap-pac >/dev/null 2>&1 && { echo "snap-pac present — pacman takes pre/post snapshots itself"; return 0; }
+  local sudo cfgs c; sudo="$(oj::sudo)"
+  mapfile -t cfgs < <($sudo snapper --csvout list-configs 2>/dev/null | awk -F, 'NR>1{print $1}')
+  [ "${#cfgs[@]}" -gt 0 ] || return 1
+  for c in "${cfgs[@]}"; do $sudo snapper -c "$c" create -c number -d "openjawz update $(oj::version) $(date -Is)" || return 1; done
+}
+if [ "$snap" = 1 ]; then
+  rc=0; out="$(snapshot 2>&1)" || rc=$?
+  case "$rc" in
+    0) oj::log ok "snapshot: ${out:-done}" ;;
+    127) oj::log info "snapshot: none (${out:-snapper not installed}) — brain backup only" ;;
+    *) oj::log warn "snapshot: snapper has no configs; nothing captured (sudo snapper -c root create-config /). Continuing without a snapshot." ;;
+  esac
+fi
+
+# pacman
+sudo="$(oj::sudo)"
+oj::run $sudo pacman -Syu --needed ${OPENJAWZ_YES:+--noconfirm} openjawz-meta
+
+# migrations
+openjawz migrate ${OPENJAWZ_YES:+--yes}
+
+# daemon reload; restart on refusal
+if oj::daemon_alive; then
+  if out="$(synaps daemon reload --json --exe /usr/bin/synaps 2>&1)"; then oj::log ok "daemon reloaded in place"
+  else oj::log warn "reload refused ($(printf '%s' "$out" | tail -1)); restarting the unit"; systemctl --user restart synaps-daemon.service; fi
+else
+  systemctl --user restart synaps-daemon.service 2>/dev/null || true
+fi
+echo
+openjawz doctor --brief || true

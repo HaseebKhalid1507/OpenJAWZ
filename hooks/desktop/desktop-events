@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# openjawz hook: desktop — dispatch to the compositor bridge that is actually running
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -d "$rt/hypr" ]; then
+  exec "$here/hypr-events"
+elif [ -n "${SWAYSOCK:-}" ] || command -v swaymsg >/dev/null 2>&1 && swaymsg -t get_version >/dev/null 2>&1; then
+  exec "$here/sway-events"
+fi
+echo "desktop-events: no Hyprland socket dir and no SWAYSOCK; nothing to do" >&2
+exit 0

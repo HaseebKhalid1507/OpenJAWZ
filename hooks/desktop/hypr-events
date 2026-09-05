@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# openjawz hook: desktop (Hyprland) — .socket2.sock via socat → focus/workspace/monitor/screencast
+# Idle: socat ~4.8 MB + this bash ~4 MB. Titles may contain ',' and '>>'; split is on the first ',' only.
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init desktop
+
+rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+sig=${HYPRLAND_INSTANCE_SIGNATURE:-}
+if [ -z "$sig" ] && [ -d "$rt/hypr" ]; then
+  # a unit started before the compositor exported its env: newest instance dir wins
+  sig=$(ls -t "$rt/hypr" 2>/dev/null | head -1 || true)
+fi
+sock=$rt/hypr/$sig/.socket2.sock
+[ -n "$sig" ] && [ -S "$sock" ] || bridge::skip "no Hyprland event socket"
+command -v socat >/dev/null || bridge::skip "socat not installed"
+
+hypr::parse() {
+  local line ev data
+  while IFS= read -r line; do
+    ev=${line%%>>*}; data=${line#*>>}
+    case $ev in
+      activewindow)
+        [ -n "$data" ] || continue                       # empty = focus left all windows
+        bridge::event focus low "class=${data%%,*}" "title=${data#*,}" ;;
+      workspacev2)
+        bridge::event workspace low "id=${data%%,*}" "name=${data#*,}" ;;
+      focusedmonv2)
+        bridge::event monitor low "focused=${data%%,*}" "workspace=${data#*,}" ;;
+      monitoraddedv2)   bridge::event monitor medium "added=${data#*,}" ;;
+      monitorremovedv2) bridge::event monitor medium "removed=${data#*,}" ;;
+      screencast)
+        bridge::event screencast medium "active=${data%%,*}" "owner=${data#*,}" ;;
+      *) ;;
+    esac
+  done
+}
+
+if [ -n "${OPENJAWZ_HOOK_REPLAY:-}" ]; then
+  hypr::parse < "$OPENJAWZ_HOOK_REPLAY"     # tests: a recorded stream instead of the socket
+else
+  socat -u UNIX-CONNECT:"$sock" - | hypr::parse
+fi

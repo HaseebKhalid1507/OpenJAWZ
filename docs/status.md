@@ -61,7 +61,7 @@ From the three handoffs and PLAN §9:
 - **C**: tools batch 2 (toolmake, tools-doc, maintain, backup, yt, web, tracker); the 12 lifted skills
   (5 discipline skills shipped); manual 03–05 (01–02 shipped); `refresh`; whiptail fallback for onboard.
 - Derivative-distro matrix entry (`ID_LIKE=arch` os-release override in the smoke).
-- Gauntlet round 2 (round 1: see "Gauntlet" below) → `docs/gauntlet/summary.md` once committed.
+- Gauntlet round 2 (round 1: see "Gauntlet" below) → summarised in `docs/gauntlet/summary.md` (committed).
 
 ## Gauntlet
 
@@ -73,8 +73,8 @@ Scope C, this branch: README says local mode is the only install path; no `openj
 claimed; architecture/spectrum describe the shipped `Type=simple` daemon; memory gates are stated as
 bench-box-only; `brain scan` really scans (Python `sqlite3` REGEXP, fixture-DB test); `brain purge`;
 `umask 077` on brain backups; one axel spawn story; onboarding counted honestly; OP.md lists only verbs
-that exist; `openjawz shutdown` verifies before it writes. Round 2 has not run. `docs/gauntlet/` does
-not exist until a round's merged file is committed.
+that exist; `openjawz shutdown` verifies before it writes. The merged round summary is committed at
+`docs/gauntlet/summary.md`.
 
 ## Synaps PRs still needed (PLAN §7)
 

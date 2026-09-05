@@ -13,7 +13,9 @@
 #  7 post-op ls of the sacred files
 #  8 brain: axel extract the brief → staged; axel handoff set < handoff.md   (skipped when axel is absent)
 #  9 backup --quick (skipped when the backup tool is absent)
-# --auto (from the daemon's on_session_end): never refuses; marks the checkpoint "unclean" instead and exits 2.
+# Order of execution: VERIFY first (1, 3, 5, 7 — nothing is written while any of them can fail), then WRITE
+# (2, 4, 8, 9), then the stamp. A refused run leaves sessions.md, checkpoint.md and the stamp untouched, so it can be re-run.
+# --auto (from the daemon's on_session_end): never refuses; marks the checkpoint "unclean" (once) instead and exits 2.
 set -euo pipefail
 export OJ_CMD=shutdown
 # shellcheck source=../ops/lib/source-lib.sh
@@ -74,13 +76,25 @@ else refuse "3 handoff.md not updated this session (pass --no-handoff if nothing
 J="$OPENJAWZ_HOME/notes/journal/$(date -I).md"
 if [ -s "$J" ]; then step "✓" "5 journal $(basename "$J")"; else refuse "5 journal entry missing: $J"; fi
 
+# 7 ── sacred files (verified BEFORE anything is written)
+missing=""
+for f in "$OPENJAWZ_DATA/tasks.json" "$OPENJAWZ_DATA/tasks_history.json" "$A/sessions_recent.md" "$A/handoff.md" "$A/checkpoint.md" "$OPENJAWZ_HOME/SOUL.md" "$OPENJAWZ_HOME/OP.md"; do
+  [ -e "$f" ] || missing="$missing $f"
+done
+if [ -z "$missing" ]; then step "✓" "7 sacred files present"; else refuse "7 MISSING:$missing"; fi
+
 if [ $fail = 1 ]; then
   rm -f "$since_ref"
   if [ $AUTO = 1 ]; then
-    printf '# Checkpoint — UNCLEAN shutdown %s: the session ended without the checklist.\n' "$(date '+%Y-%m-%d %H:%M')" >> "$A/checkpoint.md"
-    oj::log warn "shutdown --auto: checklist incomplete; checkpoint marked unclean"; exit 2
+    if [ -f "$A/checkpoint.md" ] && grep -q '^# Checkpoint — UNCLEAN shutdown' "$A/checkpoint.md"; then
+      oj::log warn "shutdown --auto: checklist incomplete; checkpoint already marked unclean"
+    else
+      printf '# Checkpoint — UNCLEAN shutdown %s: the session ended without the checklist.\n' "$(date '+%Y-%m-%d %H:%M')" >> "$A/checkpoint.md"
+      oj::log warn "shutdown --auto: checklist incomplete; checkpoint marked unclean"
+    fi
+    exit 2
   fi
-  oj::log err "shutdown refused — fix the ✗ items and run again"; exit 1
+  oj::log err "shutdown refused — nothing written; fix the ✗ items and run again"; exit 1
 fi
 [ $DRY = 1 ] && { step "·" "dry run — nothing written"; rm -f "$since_ref"; exit 0; }
 
@@ -100,23 +114,17 @@ step "✓" "4 checkpoint cleared"
 ctx_touched=0; for f in "$A/projects_active.md" "$OPENJAWZ_HOME/context/people.md" "$OPENJAWZ_HOME/context/full/projects_full.md"; do touched "$f" && ctx_touched=1; done
 if [ $ctx_touched = 1 ]; then step "✓" "6 context files updated"; else step "!" "6 context files untouched — dispatch context-updater with the brief if anything changed"; warn=1; fi
 
-# 7 ── post-op verification
-missing=""
-for f in "$OPENJAWZ_DATA/tasks.json" "$OPENJAWZ_DATA/tasks_history.json" "$A/sessions_recent.md" "$A/handoff.md" "$A/checkpoint.md" "$OPENJAWZ_HOME/SOUL.md" "$OPENJAWZ_HOME/OP.md"; do
-  [ -e "$f" ] || missing="$missing $f"
-done
-if [ -z "$missing" ]; then step "✓" "7 sacred files present"; else step "✗" "7 MISSING:$missing"; fail=1; fi
-
 # 8 ── brain
 if oj::have axel; then
-  if axel extract "$BRIEF" >/dev/null 2>&1; then step "✓" "8 brain: brief extracted to staging"; else step "!" "8 brain: axel extract failed"; warn=1; fi
-  if axel handoff set < "$A/handoff.md" >/dev/null 2>&1; then step "✓" "8 brain: handoff stored"; else step "!" "8 brain: axel handoff set failed"; warn=1; fi
+  if err=$(axel extract "$BRIEF" 2>&1 >/dev/null); then step "✓" "8 brain: brief extracted to staging"; else step "!" "8 brain: axel extract failed: $(printf '%s' "$err" | tail -1)"; warn=1; fi
+  if err=$(axel handoff set < "$A/handoff.md" 2>&1 >/dev/null); then step "✓" "8 brain: handoff stored"; else step "!" "8 brain: axel handoff set failed: $(printf '%s' "$err" | tail -1)"; warn=1; fi
 else step "·" "8 brain: axel not installed (skipped)"; fi
 
 # 9 ── backup
 if tool backup --quick >/dev/null 2>&1; then step "✓" "9 backup --quick"; else step "·" "9 backup: tool absent or failed (skipped)"; fi
 
-touch "$STAMP"; rm -f "$since_ref"
-if [ $fail = 1 ]; then oj::log err "shutdown finished with errors"; exit 1; fi
+rm -f "$since_ref"
+if [ $fail = 1 ]; then oj::log err "shutdown finished with errors — stamp not written"; exit 1; fi
+touch "$STAMP"
 [ $warn = 1 ] && oj::log warn "shutdown complete with warnings" || oj::log ok "shutdown complete — S${NUM#S}"
 exit 0

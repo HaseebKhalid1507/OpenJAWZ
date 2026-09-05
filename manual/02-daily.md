@@ -7,7 +7,7 @@ The loop is: boot → work (checkpoint every ~10 exchanges) → shutdown. Everyt
 synaps                          # attach (thin client to the daemon)
 openjawz boot                   # the agent runs this; you can too — Identity → Work → World
 openjawz checkpoint "…"         # every ~10 exchanges; --append for concurrent sessions; --clear
-openjawz shutdown               # the 7-step checklist, verified; refuses if the brief/handoff/journal are missing
+openjawz shutdown               # the 7-step checklist, verified first, written last; refuses if the brief/handoff/journal are missing
 openjawz shutdown --no-handoff  # nothing in flight
 ```
 What the agent writes and where:

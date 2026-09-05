@@ -35,9 +35,9 @@ cp /etc/pacman.conf /work/pacman.conf.before
 mkdir -p /empty; chmod 755 /empty
 runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/run/user/1000 OPENJAWZ_YES=1 sh /tmp/src/boot --local /empty >/work/boot-empty.log 2>&1 && { echo "  FAIL A1 boot --local /empty succeeded"; neg=1; } || echo "  ok   A1 boot --local /empty refused: $(tail -1 /work/boot-empty.log)"
 pacman -Sy >/dev/null 2>&1 && echo "  ok   A1 pacman -Sy still works after the refused local boot" || { echo "  FAIL A1 pacman -Sy broken after the refused local boot"; neg=1; }
-echo "127.0.0.1 github.com" >> /etc/hosts
+cp /etc/hosts /work/hosts.bak; echo "127.0.0.1 github.com" >> /etc/hosts
 runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/run/user/1000 OPENJAWZ_YES=1 sh /tmp/src/boot >/work/boot-public.log 2>&1 && { echo "  FAIL A1 public boot succeeded against a dead host"; neg=1; } || echo "  ok   A1 public boot refused: $(tail -1 /work/boot-public.log)"
-sed -i '/127.0.0.1 github.com/d' /etc/hosts
+cat /work/hosts.bak > /etc/hosts
 cmp -s /etc/pacman.conf /work/pacman.conf.before && [ ! -e /etc/pacman.d/openjawz.conf ] && echo "  ok   A1 /etc/pacman.conf byte-identical, no openjawz.conf" || { echo "  FAIL A1 public-path failure left /etc changed"; neg=1; }
 runuser -u tester -- sh /tmp/src/boot --help >/dev/null 2>&1 && echo "  ok   A1 boot --help rc 0" || { echo "  FAIL A1 boot --help rc≠0"; neg=1; }
 step "boot --local ($P)  [clock starts]"

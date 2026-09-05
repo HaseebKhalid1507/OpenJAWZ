@@ -63,7 +63,8 @@ build() { # dir [--unsigned] env…
   echo "== $d"
   ( cd "$src/packages/$d" && env "$@" "${cmd[@]}" ) || { echo "!! $d failed" >&2; failed+=("$d"); return 1; }
 }
-build openjawz OPENJAWZ_SRC="$src" || true
+# -e: the tag checkout is skipped when a local tree is supplied (prepare() copies it in)
+mk+=(-e); build openjawz OPENJAWZ_SRC="$src" || true; unset "mk[-1]"
 if [ -n "${SYNAPS_TARBALL:-}" ]; then cp -f "$SYNAPS_TARBALL" "$src/packages/synaps-bin/"; build synaps-bin SYNAPS_TARBALL="$SYNAPS_TARBALL" ${SYNAPS_SHA256:+SYNAPS_SHA256="$SYNAPS_SHA256"} || true
 else echo "-- synaps-bin: no SYNAPS_TARBALL, trying the release URL"; build synaps-bin A=1 || true; fi
 if [ -n "${AXEL_TARBALL:-}" ]; then cp -f "$AXEL_TARBALL" "$src/packages/axel-bin/"; build axel-bin AXEL_TARBALL="$AXEL_TARBALL" ${AXEL_SHA256:+AXEL_SHA256="$AXEL_SHA256"} || true

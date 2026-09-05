@@ -4,7 +4,7 @@ Every `tests/<name>/run.sh`: exit **0** pass / **1** fail / **77** skipped (miss
 
 | tier | when | tests |
 |---|---|---|
-| `fast` | every push, < 10 s, no container | `grep-guard`, `lint`, `templates`, `tools`, `brain`, `hook-filter`, `pkg`, `migrate`, `memprof` (dry parse only) |
+| `fast` | every push, < 10 s, no container | `grep-guard`, `lint`, `templates`, `tools`, `brain`, `hook-filter`, `pkg`, `migrate`, `boot-db-sig`, `build-repo-pkgrel`, `ambient-unit`, `heartbeat`, `alpm-staging`, `purge-manifest`, `docs`, `memprof` (dry parse only) |
 | `container` | by hand on a builder (`.github/workflows/install-smoke.yml` is `workflow_dispatch` only until a runner exists); a privileged `archlinux:latest` with systemd | `install-smoke`, `uninstall-clean`, `hooks` |
 | `hardware` | never in CI; run by hand on real hardware, numbers pasted into release notes | memprof's real gates (tests/memprof/gates.sh without --dry) |
 

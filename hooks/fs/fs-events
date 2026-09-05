@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# openjawz hook: fs — inotifywait on the roots in ~/.config/openjawz/watch.list → "fs: op=… path=…"
+# Idle: inotifywait ~4.4 MB + bash ~4 MB. Watches = directories under each root to :depth (default 3).
+# Exit 78 (EX_CONFIG) when the kernel watch limit is hit — the unit has Restart=no for that code and
+# the sysctl line is printed to the journal.
+set -euo pipefail
+# shellcheck source=hooks/lib/bridge.sh
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/hooks/bridge.sh" 2>/dev/null \
+  || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bridge.sh"
+bridge::init fs
+command -v inotifywait >/dev/null || bridge::skip "inotify-tools not installed"
+
+list=${OPENJAWZ_WATCH_LIST:-$OPENJAWZ_CONFIG/watch.list}
+[ -r "$list" ] || list=$OPENJAWZ_SHARE/hooks/watch.list.default
+[ -r "$list" ] || list=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/watch.list.default
+[ -r "$list" ] || bridge::skip "no watch.list"
+
+TAB=$'\t'
+EXCLUDE='/(\.git|node_modules|target|\.cache|__pycache__|\.venv|venv|dist|build|\.next)(/|$)'
+
+# expand roots to an explicit directory list (depth-bounded) — inotifywait -r has no depth limit
+dirs=()
+while IFS= read -r line; do
+  line=${line%%#*}; line=${line//[[:space:]]/}
+  [ -n "$line" ] || continue
+  root=${line%%:*}; depth=${line#*:}; [ "$depth" = "$line" ] && depth=3
+  root=${root/#\~/$HOME}; root=${root//\$HOME/$HOME}
+  [ -d "$root" ] || continue
+  while IFS= read -r d; do dirs+=("$d"); done < <(
+    find "$root" -maxdepth "$depth" -type d \
+      -regextype posix-extended -not -regex ".*$EXCLUDE.*" 2>/dev/null)
+done < "$list"
+[ "${#dirs[@]}" -gt 0 ] || bridge::skip "watch.list matched no directories"
+
+limit=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 8192)
+if [ "${#dirs[@]}" -ge "$limit" ]; then
+  oj::log err "fs: ${#dirs[@]} directories > fs.inotify.max_user_watches=$limit"
+  oj::log err "fs: raise it:  sudo sysctl -w fs.inotify.max_user_watches=524288   (persist in /etc/sysctl.d/40-openjawz.conf) — or trim watch.list"
+  exit 78
+fi
+oj::log info "fs: watching ${#dirs[@]} directories from $list"
+
+fs::parse() {
+  local path ev sev
+  while IFS=$'\t' read -r path ev; do
+    case $ev in *ISDIR*) continue ;; esac
+    case $path in *.swp|*.swx|*~|*/.#*|*.tmp|*.part|*.crdownload|*/4913) continue ;; esac
+    sev=low
+    case $ev in CREATE*|MOVED_TO*) sev=medium ;; esac
+    bridge::event fs "$sev" "op=${ev,,}" "path=${path/#$HOME/\~}"
+  done
+}
+
+# one line per event, tab-separated: path<TAB>EVENTS
+errlog=$(mktemp -t openjawz-fs.XXXXXX)
+trap 'rm -f "$errlog"' EXIT
+set +e
+inotifywait -m -q -e create,close_write,moved_to,delete --format "%w%f${TAB}%e" --exclude "$EXCLUDE" "${dirs[@]}" \
+  2>"$errlog" | fs::parse
+rc=${PIPESTATUS[0]}
+set -e
+if grep -q 'upper limit on inotify watches' "$errlog" 2>/dev/null; then
+  oj::log err "fs: inotify watch limit reached (fs.inotify.max_user_watches=$limit)"
+  oj::log err "fs: raise it:  sudo sysctl -w fs.inotify.max_user_watches=524288   (persist in /etc/sysctl.d/40-openjawz.conf) — or trim watch.list"
+  exit 78
+fi
+[ -s "$errlog" ] && oj::log warn "fs: $(head -c 300 "$errlog")"
+exit "$rc"

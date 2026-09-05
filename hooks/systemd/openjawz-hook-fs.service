@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenJAWZ hook: filesystem events (inotify on ~/.config/openjawz/watch.list)
+Documentation=https://github.com/HaseebKhalid1507/OpenJAWZ/blob/main/docs/hooks.md
+PartOf=openjawz-hooks.target
+After=openjawz-ambient.service
+# idle: inotifywait 4.4 MB + bash 4 MB; kernel ~1 KB per watched directory
+
+[Service]
+ExecStart=/usr/lib/openjawz/hooks/fs-events
+Restart=on-failure
+# 78 = EX_CONFIG: inotify watch limit hit — restarting will not help; the journal has the sysctl line
+RestartPreventExitStatus=78
+RestartSec=2
+Slice=background.slice
+
+[Install]
+WantedBy=default.target openjawz-hooks.target

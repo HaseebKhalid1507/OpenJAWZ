@@ -29,7 +29,7 @@ then `tar czf synaps.tar.gz -C target/release synaps`) and pass it in. Without i
 
 ```sh
 git clone https://github.com/HaseebKhalid1507/OpenJAWZ && cd OpenJAWZ
-SYNAPS_TARBALL=/path/to/synaps.tar.gz packages/build-repo.sh --throwaway   # PKGBUILDs → build/repo, throwaway signing key
+SYNAPS_TARBALL=/path/to/synaps.tar.gz packages/build-repo.sh --no-sign     # PKGBUILDs → build/repo, local UNSIGNED repo
 OPENJAWZ_YES=1 sh boot --local build/repo                                   # non-interactive; prints a red UNSIGNED LOCAL REPO banner
 openjawz doctor                                                             # green rows, some yellow (brain absent until axel ships)
 synaps --attach --new                                                       # you are attached

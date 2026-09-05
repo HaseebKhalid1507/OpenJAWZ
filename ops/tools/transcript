@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # openjawz-transcript: read the dialogue out of a session store (no tool calls, no thinking)
-# usage: openjawz transcript list|show|export [--store synaps] [--raw] ...
+# usage: openjawz transcript list|show|dump|search|stats [--raw] ...
 # owner: openjawz-ops
 # ci: fast
 """

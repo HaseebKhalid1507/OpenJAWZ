@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # openjawz-toolstats: tool usage metrics — what runs, how long, what fails, what gathers dust
-# usage: openjawz toolstats log|stats|tool|unused|recent ...
+# usage: openjawz toolstats stats|report|top|agents|failures|trends|tool|log ...
 # owner: openjawz-ops
 # ci: fast
 """

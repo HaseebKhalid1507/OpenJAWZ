@@ -3,3 +3,5 @@ github\.com/HaseebKhalid1507/       # the public repo URL
 ^tests/grep-guard/                  # the lists themselves
 ^LICENSE:[0-9]+:Copyright           # MIT copyright holder
 raw\.githubusercontent\.com/HaseebKhalid1507/   # the raw boot URL
+^tests/install-smoke/driver\.sh:.*(/home/tester|user@1000)   # the container's throwaway test user
+^docs/hooks\.md:.*~/Projects/x/a\.md                              # illustrative event payload

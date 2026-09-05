@@ -1,0 +1,6 @@
+# generic shapes only — no private strings here; the private word list is hashed in forbidden.sha256
+/home/[a-z][a-z0-9_-]+
+~/[A-Z][A-Za-z0-9_-]+/
+\b(10|192\.168|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]+\.[0-9]+\b
+\b[a-z0-9-]+\.(local|lan|home|internal)\b
+\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}\b

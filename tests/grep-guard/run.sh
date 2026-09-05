@@ -8,9 +8,18 @@ v() { [ "${OPENJAWZ_TEST_VERBOSE:-0}" = 1 ] && echo "$@" >&2; return 0; }
 mapfile -t tracked < <(git ls-files -co --exclude-standard)
 allow="$(sed -E 's/[[:space:]]+#[^#]*$//' "$here/allow.txt" | grep -v '^$')"
 
-# 1. forbidden words (case-insensitive, word-boundaried), minus the allowlist
-hits="$(grep -EIin -f "$here/forbidden.txt" -- "${tracked[@]}" 2>/dev/null | grep -viE "$allow")"
-[ -n "$hits" ] && { echo "FAIL forbidden:"; echo "$hits"; fail=1; }
+# 1. forbidden words — the private list is NOT in this repo. forbidden.sha256 holds sha256(lowercase token);
+#    every word (>=3 chars) in every tracked text file is hashed and looked up. Regenerate with make-hashes.sh.
+tokens="$(grep -ohEI '[A-Za-z0-9]{3,}' -- "${tracked[@]}" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u)"
+hits="$(while read -r t; do h="$(printf '%s' "$t" | sha256sum | cut -c1-64)"; grep -qx "$h" "$here/forbidden.sha256" && echo "$t"; done <<< "$tokens")"
+hits="$(printf '%s' "$hits" | grep -v '^$' || true)"
+if [ -n "$hits" ]; then
+  shown="$(while read -r t; do [ -n "$t" ] && grep -EIinw "$t" -- "${tracked[@]}" 2>/dev/null | grep -viE "$allow"; done <<< "$hits" | head -20)"
+  if [ -n "$shown" ]; then echo "FAIL forbidden token(s) present (hashed list):"; echo "$shown"; fail=1; fi
+fi
+# 1b. generic private-shaped patterns (paths, RFC1918, internal hostnames, emails) — reveal nothing themselves
+hits="$(grep -EIn -f "$here/patterns.txt" -- "${tracked[@]}" 2>/dev/null | grep -v "^$here/" | grep -viE "$allow")"
+[ -n "$hits" ] && { echo "FAIL private-shaped:"; echo "$hits"; fail=1; }
 
 # 2. secret patterns (case-sensitive), the lists themselves excluded
 hits="$(grep -EIn -f "$here/secrets.txt" -- "${tracked[@]}" 2>/dev/null | grep -v "^$here/")"
@@ -23,10 +32,7 @@ while read -r g; do
   [ -n "$m" ] && { echo "FAIL tracked data file ($g):"; echo "$m"; fail=1; }
 done < "$here/paths.txt"
 
-# 4. the comparable distro is never named (pattern assembled so this file does not name it either)
-distro="$(printf 'REDACTED')"
-hits="$(grep -EIil "$distro" -- "${tracked[@]}" 2>/dev/null)"
-[ -n "$hits" ] && { echo "FAIL names the comparable distro:"; echo "$hits"; fail=1; }
+# 4. the comparable distro is never named — its name is in the hashed list (step 1); nothing here spells it.
 
 # 5. the product is OpenJAWZ; the agent name is the user's
 hits="$(grep -Pn '(?<![Oo][Pp][Ee][Nn])JAWZ|\bJawz\b' -- "${tracked[@]}" 2>/dev/null | grep -v "^$here/")"

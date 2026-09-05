@@ -144,7 +144,7 @@ seed "$OPENJAWZ_DATA/tasks_history.json" '{"tasks": []}'
 
 # ── config: identity= (one line from SOUL "Who am I") + agent_name= ; idempotent ──
 CFG="$SYNAPS_BASE_DIR/config"
-touch "$CFG"
+( umask 077; touch "$CFG" ); chmod 600 "$CFG"   # config holds identity — keep it 0600 (new + pre-existing)
 identity_line="You are $AGENT_NAME, an agent running on Synaps, living in $USER_NAME's machine. You work for $USER_NAME: $USER_DOES."
 set_key() { # set_key KEY VALUE — replace the line if present, else append
   local k=$1 v=$2 tmp

@@ -30,6 +30,9 @@ rm -rf /tmp/src2; cp -a /tmp/src /tmp/src2; sed -i 's/^pkgrel=1$/pkgrel=2/' /tmp
 mkdir -p /repo2 && chown tester /repo2
 runuser -u tester -- env HOME=/home/tester ${st:+SYNAPS_TARBALL=$st} ${ax:+AXEL_TARBALL=$ax} \
   /tmp/src2/packages/build-repo.sh --no-sign --out /repo2 --src /tmp/src2 2>&1 | grep -E "^(!!|repo:)"
+# the shared pkgcache is for distro packages only: our own names from an earlier run (possibly with a
+# throwaway .sig beside them) would be picked over the freshly built bytes (A8 cache poisoning)
+rm -f /var/cache/pacman/pkg/openjawz-* /var/cache/pacman/pkg/synaps-bin-* /var/cache/pacman/pkg/axel-bin-*
 step "boot negatives (A1)"
 cp /etc/pacman.conf /work/pacman.conf.before
 mkdir -p /empty; chmod 755 /empty

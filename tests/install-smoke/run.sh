@@ -8,7 +8,7 @@ P="${1:-desktop}"; name="${OPENJAWZ_SMOKE_NAME:-oj-smoke}"
 command -v docker >/dev/null || { echo "install-smoke: docker missing"; exit 77; }
 [ -n "${SYNAPS_TARBALL:-}" ] && [ -f "$SYNAPS_TARBALL" ] || { echo "install-smoke: SYNAPS_TARBALL=<synaps-vX-x86_64-unknown-linux-gnu.tar.gz> required"; exit 77; }
 work="$(mktemp -d "${TMPDIR:-/tmp}/oj-smoke.XXXXXX")"; chmod 755 "$work"
-[ "${KEEP:-0}" = 1 ] || trap 'docker rm -f "$name" >/dev/null 2>&1; rm -rf "$work"' EXIT
+if [ "${KEEP:-0}" = 1 ]; then trap 'rm -rf "$work"' EXIT; else trap 'docker rm -f "$name" >/dev/null 2>&1; rm -rf "$work"' EXIT; fi
 mkdir -p "$work/src" "$work/dist"
 git archive HEAD | tar -x -C "$work/src"
 cp "$SYNAPS_TARBALL" "$work/dist/"; d="$(dirname "$SYNAPS_TARBALL")"

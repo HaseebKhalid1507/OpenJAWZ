@@ -6,8 +6,13 @@ name="$1"; work="$2"
 image="${OPENJAWZ_SMOKE_IMAGE:-archlinux:latest}"
 docker rm -f "$name" >/dev/null 2>&1 || true
 mkdir -p "$HOME/pkgcache"
-docker run -d --name "$name" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
+# SAFE INCANTATION — see README.md. Never --cgroupns=host, never bind the host /sys/fs/cgroup:
+# a second systemd on the host cgroup tree wrecks the host's session scopes.
+docker run -d --name "$name" \
+  --cgroupns=private --cgroup-parent=oj-smoke.slice \
+  --cap-add SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+  --stop-timeout 10 \
   -v "$work:/work" -v "$HOME/pkgcache:/var/cache/pacman/pkg" \
   "$image" /usr/lib/systemd/systemd --system >/dev/null
 for _ in $(seq 60); do docker exec "$name" systemctl is-system-running 2>/dev/null | grep -Eq 'running|degraded' && break; sleep 1; done

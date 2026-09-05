@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: deps
+        run: sudo apt-get install -y -q shellcheck jq >/dev/null
+      - name: fast tests (every tests/*/run.sh marked '# ci: fast')
+        run: |
+          rc=0
+          for t in tests/*/run.sh; do
+            sed -n '1,3p' "$t" | grep -q '^# ci: fast' || continue
+            echo "== $t"
+            if "$t"; then echo "-- pass"; else r=$?; [ "$r" = 77 ] && echo "-- skipped" || { echo "-- FAIL ($r)"; rc=1; }; fi
+          done
+          exit $rc

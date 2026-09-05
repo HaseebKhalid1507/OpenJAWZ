@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# openjawz-doctor: green/yellow/red health table for the install
+# usage: openjawz doctor [--json] [--brief]
+# owner: openjawz-core
+# ci: fast
+set -euo pipefail
+. "${OPENJAWZ_LIB:-/usr/lib/openjawz}/openjawz.sh"
+oj::paths
+json=0; brief=0
+for a in "$@"; do case "$a" in --json) json=1 ;; --brief) brief=1 ;; -h|--help) sed -n '2,4p' "$0"; exit 0 ;; esac; done
+
+G=(); Y=(); R=()
+green() { G+=("$1"); }
+yellow() { Y+=("$1"); }
+red() { R+=("$1"); }
+
+# Arch base
+if oj::is_arch; then green "arch: $(. /etc/os-release; echo "$ID")"; else red "not an Arch-based system"; fi
+
+# synaps
+if oj::have synaps; then
+  sv="$(synaps --version 2>/dev/null | awk '{print $NF}')"
+  if synaps daemon --help 2>/dev/null | grep -q -- '--foreground'; then green "synaps $sv (daemon mode)"; else red "synaps $sv has no daemon mode — need >= 0.9.1rc1"; fi
+else red "synaps not on PATH"; fi
+
+# axel
+if oj::have axel; then green "axel $(axel --version 2>/dev/null | awk '{print $NF}')"; else yellow "brain absent: axel not installed (pacman -S axel-bin)"; fi
+
+# config
+cfg="$SYNAPS_BASE_DIR/config"
+if [ -r "$cfg" ]; then
+  if grep -Eq '^\s*progressive_tool_disclosure\s*=\s*true' "$cfg"; then green "progressive_tool_disclosure = true"; else red "progressive_tool_disclosure != true in $cfg (daemon refuses MCP, exit 3)"; fi
+  n="$(grep -Ec '^\s*provider\.[a-z0-9_-]+\s*=' "$cfg" || true)"
+  other="$(grep -Ei '^\s*[a-z_.]*(key|token|secret|password)[a-z_.]*\s*=' "$cfg" | grep -Ev '^\s*provider\.' || true)"
+  if [ -z "$other" ]; then green "config: $n provider key(s), nothing else secret-shaped"; else yellow "config: secret-shaped keys outside provider.*: $(printf '%s' "$other" | cut -d= -f1 | tr '\n' ' ')"; fi
+else red "no $cfg (run openjawz install)"; fi
+
+# unit
+if systemctl --user --version >/dev/null 2>&1; then
+  en="$(systemctl --user is-enabled synaps-daemon.service 2>/dev/null || true)"
+  ac="$(systemctl --user is-active synaps-daemon.service 2>/dev/null || true)"
+  if [ "$en" = enabled ] && [ "$ac" = active ]; then green "synaps-daemon.service enabled + active"
+  elif [ "$ac" = active ]; then yellow "synaps-daemon.service active but $en"
+  else red "synaps-daemon.service $en/$ac (systemctl --user enable --now synaps-daemon.service)"; fi
+  mainpid="$(systemctl --user show -p MainPID --value synaps-daemon.service 2>/dev/null || echo 0)"
+  dpid="$(cat "$SYNAPS_RUN/daemon.pid" 2>/dev/null || echo "")"
+  if [ -n "$dpid" ] && [ "$mainpid" != 0 ]; then
+    if [ "$dpid" = "$mainpid" ]; then green "daemon pid $dpid == unit MainPID"; else yellow "daemon pid $dpid != unit MainPID $mainpid (auto-spawned from a terminal? synaps daemon stop; systemctl --user restart synaps-daemon.service)"; fi
+  fi
+  if [ "$ac" = active ]; then
+    if [ -f "$SYNAPS_RUN/daemon.json" ]; then green "daemon.json present"; else red "daemon.json missing while the daemon runs (a client deleted it — runtime bug; update synaps-bin)"; fi
+    [ -S "$SYNAPS_RUN/daemon.sock" ] && green "daemon.sock present" || red "daemon.sock missing"
+  fi
+  # ambient
+  aid="$(oj::ambient_id || true)"
+  if [ -n "$aid" ]; then
+    lc="$(synaps daemon sessions --json 2>/dev/null | jq -r --arg id "$aid" '.[]|select(.id==$id)|(.lifecycle // .state // "live")' 2>/dev/null | head -1)"
+    if [ -n "$lc" ]; then green "ambient session $aid ($lc)"; else yellow "ambient session $aid not live (openjawz ambient ensure)"; fi
+  else yellow "no ambient session (openjawz ambient ensure)"; fi
+  # graphical-session
+  if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
+    if systemctl --user is-active graphical-session.target >/dev/null 2>&1; then green "graphical-session.target active"
+    else yellow "graphical-session.target inactive: Wayland hooks never start. Hyprland: exec-once = systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP && systemctl --user start hyprland-session.target (or use uwsm)"; fi
+  fi
+  # hooks
+  while IFS= read -r u; do
+    [ -n "$u" ] || continue
+    s="$(systemctl --user is-active "$u" 2>/dev/null || true)"
+    e="$(systemctl --user is-enabled "$u" 2>/dev/null || true)"
+    if [ "$s" = active ]; then green "$u active"
+    elif [ "$e" = disabled ]; then yellow "$u disabled"
+    elif systemctl --user show -p Result --value "$u" 2>/dev/null | grep -q success && systemctl --user status "$u" 2>/dev/null | grep -q 'condition'; then green "$u condition-skipped (no compositor)"
+    elif [ "$s" = failed ]; then red "$u failed (journalctl --user -u $u)"
+    else yellow "$u $s"; fi
+  done < <(systemctl --user list-unit-files 'openjawz-hook-*.service' --no-legend 2>/dev/null | awk '{print $1}')
+  if systemctl --user list-unit-files foot-server.socket --no-legend 2>/dev/null | grep -q enabled; then green "foot-server.socket enabled (fast summon)"; fi
+else red "no systemd user session"; fi
+
+# migrations
+if [ -d "$OPENJAWZ_STATE/migrations" ]; then
+  if compgen -G "$OPENJAWZ_STATE/migrations/*.running" >/dev/null; then red "migration did not finish: $(basename "$(ls "$OPENJAWZ_STATE"/migrations/*.running | head -1)" .running) (openjawz migrate --force|--skip)"; fi
+  p="$(openjawz migrate --pending 2>/dev/null || echo none)"
+  if [ "$p" = none ]; then green "migrations: none pending"; else yellow "migrations pending: $(printf '%s' "$p" | wc -l) (openjawz migrate)"; fi
+else yellow "no migration state (openjawz install)"; fi
+
+# repo
+if [ -r /etc/pacman.d/openjawz.conf ]; then
+  if grep -q 'Include = /etc/pacman.d/openjawz.conf' /etc/pacman.conf; then
+    if grep -Eq '^SigLevel\s*=\s*Required' /etc/pacman.d/openjawz.conf; then green "repo [openjawz] Include present, SigLevel Required"
+    elif grep -q 'OPENJAWZ-LOCAL' /etc/pacman.d/openjawz.conf; then yellow "repo [openjawz] is a LOCAL UNSIGNED test repo"
+    else red "repo [openjawz] SigLevel is not Required"; fi
+  else yellow "/etc/pacman.d/openjawz.conf exists but is not Included from pacman.conf"; fi
+else yellow "no [openjawz] repo configured (installed from packages by hand?)"; fi
+
+# brain consolidation
+if oj::have axel && [ -f "$OPENJAWZ_STATE/last-consolidation" ]; then
+  age=$(( ($(date +%s) - $(stat -c %Y "$OPENJAWZ_STATE/last-consolidation")) / 3600 ))
+  [ "$age" -le 24 ] && green "brain consolidated ${age}h ago" || yellow "brain last consolidated ${age}h ago"
+fi
+
+# ── output ───────────────────────────────────────────────────────────────────
+if [ "$json" = 1 ]; then
+  jq -n --argjson g "$(printf '%s\n' "${G[@]:-}" | jq -R . | jq -s 'map(select(.!=""))')" \
+        --argjson y "$(printf '%s\n' "${Y[@]:-}" | jq -R . | jq -s 'map(select(.!=""))')" \
+        --argjson r "$(printf '%s\n' "${R[@]:-}" | jq -R . | jq -s 'map(select(.!=""))')" \
+        '{green:$g, yellow:$y, red:$r}'
+  exit 0
+fi
+c() { [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && printf '\e[%sm%s\e[0m' "$1" "$2" || printf '%s' "$2"; }
+if [ "$brief" = 1 ]; then
+  echo "doctor: $(c 32 "${#G[@]} green") · $(c 33 "${#Y[@]} yellow") · $(c 31 "${#R[@]} red")"
+  for x in "${R[@]:-}"; do [ -n "$x" ] && echo "  $(c 31 red)     $x"; done
+  for x in "${Y[@]:-}"; do [ -n "$x" ] && echo "  $(c 33 yellow)  $x"; done
+else
+  for x in "${G[@]:-}"; do [ -n "$x" ] && echo "  $(c 32 '●') $x"; done
+  for x in "${Y[@]:-}"; do [ -n "$x" ] && echo "  $(c 33 '●') $x"; done
+  for x in "${R[@]:-}"; do [ -n "$x" ] && echo "  $(c 31 '●') $x"; done
+  echo "doctor: ${#G[@]} green · ${#Y[@]} yellow · ${#R[@]} red"
+fi
+[ "${#R[@]}" = 0 ]

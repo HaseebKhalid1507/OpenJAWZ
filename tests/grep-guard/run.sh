@@ -8,14 +8,22 @@ v() { [ "${OPENJAWZ_TEST_VERBOSE:-0}" = 1 ] && echo "$@" >&2; return 0; }
 mapfile -t tracked < <(git ls-files -co --exclude-standard)
 allow="$(sed -E 's/[[:space:]]+#[^#]*$//' "$here/allow.txt" | grep -v '^$')"
 
-# 1. forbidden words — the private list is NOT in this repo. forbidden.sha256 holds sha256(lowercase token);
-#    every word (>=3 chars) in every tracked text file is hashed and looked up. Regenerate with make-hashes.sh.
-tokens="$(grep -ohEI '[A-Za-z0-9]{3,}' -- "${tracked[@]}" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u)"
-hits="$(while read -r t; do h="$(printf '%s' "$t" | sha256sum | cut -c1-64)"; grep -qx "$h" "$here/forbidden.sha256" && echo "$t"; done <<< "$tokens")"
-hits="$(printf '%s' "$hits" | grep -v '^$' || true)"
-if [ -n "$hits" ]; then
-  shown="$(while read -r t; do [ -n "$t" ] && grep -EIinw "$t" -- "${tracked[@]}" 2>/dev/null | grep -viE "$allow"; done <<< "$hits" | head -20)"
-  if [ -n "$shown" ]; then echo "FAIL forbidden token(s) present (hashed list):"; echo "$shown"; fail=1; fi
+# 1. forbidden words — the private list is NOT in this repo and the digests are HMAC-SHA256 under a key that is
+#    NOT in this repo (CI secret OPENJAWZ_GUARD_KEY; maintainers set it locally). Without the key this step is
+#    SKIPPED with a warning — the generic shape patterns (1b) and every other step still run.
+if [ -n "${OPENJAWZ_GUARD_KEY:-}" ]; then
+  tokens="$(grep -ohEI '[A-Za-z0-9]{3,}' -- "${tracked[@]}" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u)"
+  hits="$(while read -r t; do h="$(printf '%s' "$t" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$OPENJAWZ_GUARD_KEY" | awk '{print $NF}')"; grep -qx "$h" "$here/forbidden.hmac" && echo "$t"; done <<< "$tokens" | grep -v '^$' || true)"
+  if [ -n "$hits" ]; then
+    shown="$(while read -r t; do [ -n "$t" ] && grep -EIinw "$t" -- "${tracked[@]}" 2>/dev/null | grep -viE "$allow"; done <<< "$hits" | head -20)"
+    if [ -n "$shown" ]; then echo "FAIL forbidden token(s) present (private list):"; echo "$shown"; fail=1; fi
+  fi
+  # commit messages too (the guard used to scan files only)
+  msgs="$(git log --format=%B 2>/dev/null | grep -ohE '[A-Za-z0-9]{3,}' | tr 'A-Z' 'a-z' | sort -u)"
+  mh="$(while read -r t; do h="$(printf '%s' "$t" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$OPENJAWZ_GUARD_KEY" | awk '{print $NF}')"; grep -qx "$h" "$here/forbidden.hmac" && echo "$t"; done <<< "$msgs" | grep -v '^$' || true)"
+  [ -n "$mh" ] && { echo "FAIL forbidden token(s) in commit messages:"; echo "$mh"; fail=1; }
+else
+  echo "warn: OPENJAWZ_GUARD_KEY unset — private-word check skipped (shape patterns still enforced)" >&2
 fi
 # 1b. generic private-shaped patterns (paths, RFC1918, internal hostnames, emails) — reveal nothing themselves
 hits="$(grep -EIn -f "$here/patterns.txt" -- "${tracked[@]}" 2>/dev/null | grep -v "^$here/" | grep -viE "$allow")"

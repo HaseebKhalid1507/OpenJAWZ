@@ -2,3 +2,4 @@ github\.com/HaseebKhalid1507/       # the public repo URL
 ^[^:]*:[0-9]+:#\s*Maintainer:       # AUR requires a Maintainer line
 ^tests/grep-guard/                  # the lists themselves
 ^LICENSE:[0-9]+:Copyright           # MIT copyright holder
+raw\.githubusercontent\.com/HaseebKhalid1507/   # the raw boot URL

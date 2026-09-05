@@ -1,0 +1,15 @@
+*.r8
+*.r8-wal
+*.r8-shm
+*.hnsw
+*.db
+auth.json*
+broker-token
+server-token
+*_token*.json
+*credentials*.json
+.secrets/*
+venv/*
+__pycache__/*
+*.bak
+*.pkg.tar.zst

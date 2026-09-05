@@ -13,7 +13,8 @@ OS event ──bridge──▶ synaps send --session ambient ──▶ <event �
 Every bridge sources `hooks/lib/bridge.sh` and delivers through **one** function
 (`bridge::emit`): that is where the content filter, coalescing (300 ms), the per-bridge rate cap
 (60/min) and the pause flag live; the actual `synaps send` is `oj::send` in `lib/openjawz.sh` — the
-only one in the tree. The contract (source, content-type, severity, text) is in `hooks/README.md`.
+only one in the **hooks/bridge pipeline** (the heartbeat plugin fires its own session-addressed
+keepalive, see `plugins/heartbeat`). The contract (source, content-type, severity, text) is in `hooks/README.md`.
 
 ## The hook pipeline is a governed ingress
 
